@@ -56,18 +56,17 @@
         <div class="ha-card-content ha-summary-content">
           <div class="ha-summary-row">
             <div class="ha-summary-balance-box">
-              <div class="ha-summary-label">Balance</div>
+              <div class="ha-summary-label">Current Balance</div>
               <div class="ha-summary-value ha-balance-text">{{ ledgerData.account_balance || '—' }}</div>
-            </div>
-            <div class="ha-summary-info">
-              <div class="ha-summary-label">Last Payment</div>
-              <div class="ha-summary-value ha-payment-text">{{ ledgerData.latest_payment?.amount || 'No payment made' }}</div>
-              <div class="ha-summary-sub">{{ ledgerData.latest_payment?.payment_date || '' }}</div>
             </div>
             <div class="ha-summary-info">
               <div class="ha-summary-label">Last Bill</div>
               <div class="ha-summary-value ha-bill-text">{{ ledgerData.latest_bill?.bill_total || '—' }}</div>
               <div class="ha-summary-sub">{{ ledgerData.latest_bill?.month_range || '' }}</div>
+            </div>
+            <div class="ha-summary-info ha-due-box" v-if="latestBillDueDate">
+              <div class="ha-summary-label">Due Date</div>
+              <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
             </div>
           </div>
           <div class="ha-summary-actions">
@@ -99,83 +98,115 @@
         </div>
         <div class="ha-card-content">
           <template v-if="ledgerData.bills.length > 0">
-            <div v-for="bill in ledgerData.bills" :key="bill.id" class="ha-bill-card">
-              <div class="ha-bill-header">
-                <span>
-                  Bill Cycle: {{ bill.bill_cycle_date }}
-                  {{ bill.month_range ? ` (${bill.month_range})` : '' }}
-                </span>
-                <span v-if="bill.due_date" class="ha-bill-due">
-                  Due: {{ bill.due_date }}
-                </span>
-              </div>
-              <div class="ha-bill-entry">
-                <div class="ha-bill-content">
-                  <div class="ha-bill-meta">
-                    <span class="ha-bill-badge">Bill</span>
-                    <div>
-                      <div class="ha-bill-title">{{ bill.month_range || 'Bill' }}</div>
-                      <div class="ha-bill-date">
-                        {{ bill.bill_date ? formatDateShort(bill.bill_date) : bill.bill_cycle_date }}
-                      </div>
-                    </div>
-                  </div>
-                  <div class="ha-bill-amount">{{ bill.bill_total || '-' }}</div>
-                  <button
-                    v-if="bill.pdf_exists"
-                    type="button"
-                    class="ha-btn-link"
-                    @click="openBillPdf(bill.id)"
-                  >
-                    📄 View PDF
-                  </button>
+            <div 
+              v-for="(bill, index) in ledgerData.bills" 
+              :key="bill.id" 
+              class="ha-bill-card"
+              :class="{ 'ha-bill-card-latest': index === 0 }"
+            >
+              <!-- Bill Header - clickable to expand/collapse -->
+              <div 
+                class="ha-bill-header"
+                :class="{ 'ha-bill-header-latest': index === 0 }"
+                @click="toggleBillExpanded(bill.id)"
+              >
+                <div class="ha-bill-header-left">
+                  <span class="ha-bill-cycle">{{ bill.month_range || bill.bill_cycle_date }}</span>
+                  <span class="ha-bill-total-inline">{{ bill.bill_total || '-' }}</span>
+                </div>
+                <div class="ha-bill-header-right">
+                  <span v-if="index === 0 && bill.due_date" class="ha-bill-due-badge">
+                    Due: {{ bill.due_date }}
+                  </span>
+                  <span class="ha-expand-icon">{{ expandedBills.has(bill.id) ? '▼' : '▶' }}</span>
                 </div>
               </div>
-              <template v-if="bill.payments && bill.payments.length">
-                <div
-                  v-for="payment in bill.payments"
-                  :key="payment.id"
-                  class="ha-payment-entry"
-                >
-                  <div class="ha-payment-row">
-                    <div class="ha-payment-meta">
-                      <span class="ha-payment-badge">Payment</span>
+              
+              <!-- Bill Details (expandable) -->
+              <div v-if="expandedBills.has(bill.id)" class="ha-bill-details">
+                <div class="ha-bill-entry">
+                  <div class="ha-bill-content">
+                    <div class="ha-bill-meta">
+                      <span class="ha-bill-badge">Bill</span>
                       <div>
-                        <div class="ha-payment-desc">
-                          {{ payment.description || 'Payment Received' }}
-                          <span v-if="payment.payee_status === 'confirmed' && payment.payee_name" class="ha-payee-badge">
-                            {{ payment.payee_name }}
-                          </span>
-                          <span
-                            v-else-if="payment.payee_status === 'pending'"
-                            class="ha-payee-pending"
-                            title="Searching for payee info..."
-                          >
-                            <span class="spinner-mini">⟳</span>
-                            Loading payee...
-                          </span>
-                          <span
-                            v-else-if="payment.payee_status === 'unverified'"
-                            class="ha-payee-unverified"
-                            title="Unassigned - edit in Settings → Payments"
-                          >
-                            Unassigned
-                          </span>
-                        </div>
-                        <div class="ha-payment-sub">
-                          {{ payment.payment_date }}
-                          <span v-if="payment.card_last_four" class="ha-card-four">*{{ payment.card_last_four }}</span>
+                        <div class="ha-bill-title">{{ bill.month_range || 'Bill' }}</div>
+                        <div class="ha-bill-date">
+                          {{ bill.bill_date ? formatDateShort(bill.bill_date) : bill.bill_cycle_date }}
                         </div>
                       </div>
                     </div>
-                    <div class="ha-payment-amount">{{ payment.amount || '-' }}</div>
+                    <div class="ha-bill-amount">{{ bill.bill_total || '-' }}</div>
+                    <button
+                      v-if="bill.pdf_exists"
+                      type="button"
+                      class="ha-btn-pdf"
+                      @click.stop="openBillPdf(bill.id)"
+                    >
+                      📄 View PDF
+                    </button>
                   </div>
                 </div>
-              </template>
-              <BillPayeeSummary
-                :bill-id="bill.id"
-                :bill-summaries="billSummaries"
-              />
+                
+                <!-- Payments Section (collapsible) -->
+                <div v-if="bill.payments && bill.payments.length" class="ha-payments-section">
+                  <div 
+                    class="ha-payments-header"
+                    @click.stop="togglePaymentsExpanded(bill.id)"
+                  >
+                    <span class="ha-payments-label">
+                      💳 Payments ({{ bill.payments.length }})
+                    </span>
+                    <span class="ha-expand-icon-sm">{{ expandedPayments.has(bill.id) ? '▼' : '▶' }}</span>
+                  </div>
+                  
+                  <div v-if="expandedPayments.has(bill.id)" class="ha-payments-list">
+                    <div
+                      v-for="payment in bill.payments"
+                      :key="payment.id"
+                      class="ha-payment-entry"
+                    >
+                      <div class="ha-payment-row">
+                        <div class="ha-payment-meta">
+                          <span class="ha-payment-badge">Payment</span>
+                          <div>
+                            <div class="ha-payment-desc">
+                              {{ payment.description || 'Payment Received' }}
+                              <span v-if="payment.payee_status === 'confirmed' && payment.payee_name" class="ha-payee-badge">
+                                {{ payment.payee_name }}
+                              </span>
+                              <span
+                                v-else-if="payment.payee_status === 'pending'"
+                                class="ha-payee-pending"
+                                title="Searching for payee info..."
+                              >
+                                <span class="spinner-mini">⟳</span>
+                                Loading...
+                              </span>
+                              <span
+                                v-else-if="payment.payee_status === 'unverified'"
+                                class="ha-payee-unverified"
+                                title="Unassigned - edit in Settings → Payments"
+                              >
+                                Unassigned
+                              </span>
+                            </div>
+                            <div class="ha-payment-sub">
+                              {{ payment.payment_date }}
+                              <span v-if="payment.card_last_four" class="ha-card-four">*{{ payment.card_last_four }}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="ha-payment-amount">{{ payment.amount || '-' }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <BillPayeeSummary
+                  :bill-id="bill.id"
+                  :bill-summaries="billSummaries"
+                />
+              </div>
             </div>
 
             <!-- Orphan Payments -->
@@ -228,7 +259,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { formatDate } from '../lib/timezone'
 import { getApiBase } from '../lib/api-base'
 import { ajaxLoader } from '../lib/assets'
@@ -287,10 +318,48 @@ const showPdfModal = ref(false)
 const viewingBillId = ref<number | null>(null)
 const pdfExists = ref(false)
 const billSummaries = ref<Record<number, any>>({})
+const expandedBills = ref<Set<number>>(new Set())
+const expandedPayments = ref<Set<number>>(new Set())
+
+function toggleBillExpanded(billId: number) {
+  if (expandedBills.value.has(billId)) {
+    expandedBills.value.delete(billId)
+  } else {
+    expandedBills.value.add(billId)
+  }
+  expandedBills.value = new Set(expandedBills.value) // trigger reactivity
+}
+
+function togglePaymentsExpanded(billId: number) {
+  if (expandedPayments.value.has(billId)) {
+    expandedPayments.value.delete(billId)
+  } else {
+    expandedPayments.value.add(billId)
+  }
+  expandedPayments.value = new Set(expandedPayments.value) // trigger reactivity
+}
+
+function initializeExpandedState() {
+  // Expand the first (latest) bill and its payments by default
+  if (ledgerData.value && ledgerData.value.bills.length > 0) {
+    const latestBillId = ledgerData.value.bills[0].id
+    expandedBills.value.add(latestBillId)
+    expandedPayments.value.add(latestBillId)
+    expandedBills.value = new Set(expandedBills.value)
+    expandedPayments.value = new Set(expandedPayments.value)
+  }
+}
 
 function formatDateShort(date: string) {
   return formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' })
 }
+
+const latestBillDueDate = computed(() => {
+  if (ledgerData.value && ledgerData.value.bills.length > 0) {
+    return ledgerData.value.bills[0].due_date || null
+  }
+  return null
+})
 
 async function loadLedgerData() {
   try {
@@ -331,6 +400,7 @@ async function loadLedgerData() {
     apiError.value = "Cannot connect to Python service. Make sure it's running on port 8000."
   } finally {
     isLoading.value = false
+    initializeExpandedState()
   }
 }
 
@@ -564,4 +634,127 @@ onUnmounted(() => clearInterval(interval))
 .ha-no-bills-img { width: 120px; height: 120px; margin-bottom: 2rem; }
 .ha-no-bills-title { font-size: 1.25rem; font-weight: 600; color: #333; margin-bottom: 1rem; }
 .ha-no-bills-desc { color: #666; font-size: 1rem; max-width: 500px; line-height: 1.6; margin-bottom: 1.5rem; }
+
+/* Due Date in Summary */
+.ha-due-box {
+  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+}
+.ha-due-text {
+  color: #e65100;
+  font-weight: 700;
+}
+
+/* Bill Card - Collapsible */
+.ha-bill-card-latest {
+  border-left: 3px solid #03a9f4;
+}
+
+.ha-bill-header {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+.ha-bill-header:hover {
+  background: #e8e8e8;
+}
+
+.ha-bill-header-latest {
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+}
+.ha-bill-header-latest:hover {
+  background: linear-gradient(135deg, #bbdefb 0%, #90caf9 100%);
+}
+
+.ha-bill-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ha-bill-cycle {
+  font-weight: 600;
+  color: #333;
+}
+
+.ha-bill-total-inline {
+  font-weight: 700;
+  color: #03a9f4;
+  font-size: 0.85rem;
+}
+
+.ha-bill-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ha-bill-due-badge {
+  background: #ff9800;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.ha-expand-icon {
+  color: #666;
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.ha-expand-icon-sm {
+  color: #888;
+  font-size: 0.6rem;
+}
+
+.ha-bill-details {
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Payments Section */
+.ha-payments-section {
+  border-top: 1px solid #e0e0e0;
+}
+
+.ha-payments-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: #fafafa;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+.ha-payments-header:hover {
+  background: #f0f0f0;
+}
+
+.ha-payments-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.ha-payments-list {
+  background: #f9f9f9;
+}
+
+/* PDF Button */
+.ha-btn-pdf {
+  background: #03a9f4;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.ha-btn-pdf:hover {
+  background: #0288d1;
+}
 </style>
