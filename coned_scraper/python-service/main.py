@@ -2355,10 +2355,7 @@ class MeterConfigModel(BaseModel):
     enabled: bool = False
     email: str = ""
     password: Optional[str] = None
-    mfa_type: str = "totp"
-    mfa_secret: str = ""
-    account_uuid: str = ""
-    meter_number: str = ""
+    totp_secret: str = ""
     polling_interval: int = 15
 
 
@@ -2371,10 +2368,7 @@ async def get_meter_config():
         "enabled": False,
         "email": "",
         "password": "",
-        "mfa_type": "totp",
-        "mfa_secret": "",
-        "account_uuid": "",
-        "meter_number": "",
+        "totp_secret": "",
         "polling_interval": 15
     }
     
@@ -2396,10 +2390,7 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     new_config = {
         "enabled": config.enabled,
         "email": config.email.strip(),
-        "mfa_type": config.mfa_type,
-        "mfa_secret": config.mfa_secret.strip(),
-        "account_uuid": config.account_uuid.strip(),
-        "meter_number": config.meter_number.strip(),
+        "totp_secret": config.totp_secret.strip(),
         "polling_interval": config.polling_interval,
         "updated_at": utc_now_iso()
     }

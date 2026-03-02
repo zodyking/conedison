@@ -6,7 +6,9 @@
     </div>
     <div class="ha-card-content">
       <div class="info-text" style="margin-bottom: 1rem">
-        Connect to Con Edison's Opower API for near real-time meter readings. This creates MQTT sensors for current usage (kWh) and calculated cost.
+        Connect to Con Edison's Opower API for near real-time meter readings using the 
+        <a href="https://github.com/tronikos/opower" target="_blank" rel="noopener">opower</a> library 
+        (same as Home Assistant's Opower integration). This creates MQTT sensors for current usage (kWh) and calculated cost.
       </div>
       
       <div class="ha-form-group">
@@ -27,32 +29,12 @@
       </div>
 
       <div class="ha-form-group">
-        <label class="ha-form-label">MFA Type</label>
-        <select v-model="config.mfa_type" class="ha-form-input">
-          <option value="totp">TOTP (Authenticator App)</option>
-          <option value="security_question">Security Question</option>
-        </select>
-      </div>
-
-      <div class="ha-form-group">
-        <label class="ha-form-label">{{ config.mfa_type === 'totp' ? 'TOTP Secret' : 'Security Answer' }}</label>
-        <input v-model="config.mfa_secret" type="password" class="ha-form-input" :placeholder="config.mfa_type === 'totp' ? 'Base32 TOTP secret' : 'Your security answer'" />
-        <div v-if="config.mfa_type === 'totp'" class="info-text">The secret key from your authenticator app setup</div>
-      </div>
-
-      <div class="ha-form-group">
-        <label class="ha-form-label">Account UUID</label>
-        <input v-model="config.account_uuid" type="text" class="ha-form-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+        <label class="ha-form-label">TOTP Secret</label>
+        <input v-model="config.totp_secret" type="password" class="ha-form-input" placeholder="Base32 TOTP secret from authenticator setup" />
         <div class="info-text">
-          Find this at <a href="https://coned.opower.com" target="_blank" rel="noopener">coned.opower.com</a> → 
-          Log in → Check Network tab for API calls containing your UUID
+          In ConEd settings, set up Google Authenticator. Click "Can't scan?" to get the secret key.
+          <a href="https://github.com/tronikos/opower#supported-utilities" target="_blank" rel="noopener">More info</a>
         </div>
-      </div>
-
-      <div class="ha-form-group">
-        <label class="ha-form-label">Meter Number</label>
-        <input v-model="config.meter_number" type="text" class="ha-form-input" placeholder="Your meter number from bill" />
-        <div class="info-text">Found on your Con Edison bill</div>
       </div>
 
       <div class="ha-form-group">
@@ -118,10 +100,7 @@ const config = reactive({
   enabled: false,
   email: '',
   password: '',
-  mfa_type: 'totp',
-  mfa_secret: '',
-  account_uuid: '',
-  meter_number: '',
+  totp_secret: '',
   polling_interval: 15
 })
 
@@ -148,10 +127,7 @@ async function loadConfig() {
       config.enabled = d.enabled || false
       config.email = d.email || ''
       config.password = d.password || ''
-      config.mfa_type = d.mfa_type || 'totp'
-      config.mfa_secret = d.mfa_secret || ''
-      config.account_uuid = d.account_uuid || ''
-      config.meter_number = d.meter_number || ''
+      config.totp_secret = d.totp_secret || ''
       config.polling_interval = d.polling_interval ?? 15
     }
   } catch (e) {

@@ -1,13 +1,18 @@
 """
 Meter Service for Real-Time Con Edison Meter Readings
 
-Uses the coned library (https://github.com/bvlaicu/coned) to fetch
-near real-time meter readings from Con Edison smart meters.
+Uses the opower library (https://github.com/tronikos/opower) to fetch
+real-time meter readings from Con Edison's Opower API.
+
+The opower library is the same one used by Home Assistant's official
+Opower integration and supports Con Edison with TOTP MFA.
 """
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -16,21 +21,26 @@ _meter_service: Optional['MeterService'] = None
 
 
 class MeterService:
-    """Service for fetching and caching meter readings from Con Edison."""
+    """Service for fetching and caching meter readings from Con Edison via Opower."""
     
     def __init__(self):
-        self.meter = None
         self.last_reading: Optional[Dict[str, Any]] = None
         self.last_reading_time: Optional[datetime] = None
         self.config: Optional[Dict[str, Any]] = None
         self._polling_task: Optional[asyncio.Task] = None
         self._running = False
+        self._opower = None
+        self._accounts: List[Any] = []
     
     def is_configured(self) -> bool:
-        """Check if meter service is properly configured."""
+        """Check if meter service is properly configured.
+        
+        Requires email, password, and totp_secret for opower/ConEd authentication.
+        """
         if not self.config:
             return False
-        required = ['email', 'password', 'mfa_secret', 'account_uuid', 'meter_number']
+        # opower ConEd requires: email, password, totp_secret
+        required = ['email', 'password', 'totp_secret']
         return all(self.config.get(k) for k in required)
     
     def is_enabled(self) -> bool:
@@ -40,7 +50,8 @@ class MeterService:
     async def initialize(self, config: Dict[str, Any]) -> bool:
         """Initialize meter with configuration from database."""
         try:
-            from coned import Meter
+            from opower import Opower
+            from opower.utilities.coned import ConEd
             
             self.config = config
             
@@ -48,43 +59,99 @@ class MeterService:
                 logger.warning("Meter service not fully configured")
                 return False
             
-            mfa_type_str = config.get('mfa_type', 'totp').lower()
-            mfa_type = Meter.TOTP if mfa_type_str == 'totp' else Meter.SECURITY_QUESTION
+            # Decrypt password if encrypted
+            password = config.get('password', '')
+            if password and not password.startswith('plain:'):
+                try:
+                    from main import decrypt_data
+                    password = decrypt_data(password)
+                except Exception:
+                    pass
             
-            self.meter = Meter(
-                email=config['email'],
-                password=config['password'],
-                mfa_type=mfa_type,
-                mfa_secret=config['mfa_secret'],
-                account_uuid=config['account_uuid'],
-                meter_number=config['meter_number'],
-                site=Meter.SITE_CONED
+            # Initialize opower with ConEd utility
+            self._opower = Opower(
+                session=aiohttp.ClientSession(),
+                utility=ConEd(totp_secret=config.get('totp_secret', '')),
+                username=config['email'],
+                password=password,
             )
             
-            logger.info("Meter service initialized successfully")
+            logger.info("Meter service initialized (opower/ConEd)")
             return True
             
-        except ImportError:
-            logger.error("coned library not installed. Run: pip install coned")
+        except ImportError as e:
+            logger.error(f"opower library not installed: {e}")
             return False
         except Exception as e:
             logger.error(f"Failed to initialize meter service: {e}")
             return False
     
+    async def _login(self) -> bool:
+        """Login to Con Edison via opower."""
+        if not self._opower:
+            return False
+        
+        try:
+            await self._opower.async_login()
+            logger.info("Logged in to Con Edison via opower")
+            return True
+        except Exception as e:
+            logger.error(f"Opower login failed: {e}")
+            return False
+    
+    async def _get_accounts(self) -> List[Any]:
+        """Get accounts from opower."""
+        if not self._opower:
+            return []
+        
+        if not self._accounts:
+            try:
+                self._accounts = await self._opower.async_get_accounts()
+                logger.info(f"Found {len(self._accounts)} opower account(s)")
+            except Exception as e:
+                logger.error(f"Failed to get opower accounts: {e}")
+        
+        return self._accounts
+    
     async def fetch_reading(self) -> Optional[Dict[str, Any]]:
-        """Fetch the latest meter reading from Con Edison."""
-        if not self.meter:
-            logger.error("Meter not initialized")
+        """Fetch the latest meter reading from Con Edison (opower realtime API)."""
+        if not self.is_configured():
+            logger.error("Meter not configured")
             return None
         
         try:
-            start_time, end_time, value, unit = await self.meter.last_read()
+            # Login if needed
+            if not await self._login():
+                return None
+            
+            # Get accounts
+            accounts = await self._get_accounts()
+            if not accounts:
+                logger.error("No opower accounts found")
+                return None
+            
+            # Get realtime usage for first electric account
+            account = accounts[0]
+            
+            # Check if utility supports realtime
+            if not self._opower.utility.supports_realtime_usage():
+                logger.warning("Con Edison doesn't support realtime usage in this account")
+                return None
+            
+            reads = await self._opower.async_get_realtime_usage_reads(account)
+            
+            if not reads:
+                logger.warning("No realtime readings available")
+                return None
+            
+            # Get the most recent reading
+            latest = reads[-1]  # Last entry is most recent
             
             reading = {
-                'start_time': str(start_time) if start_time else None,
-                'end_time': str(end_time) if end_time else None,
-                'value': float(value) if value is not None else None,
-                'unit': unit or 'kWh',
+                'start_time': latest.start_time.isoformat() if latest.start_time else None,
+                'end_time': latest.end_time.isoformat() if latest.end_time else None,
+                'value': float(latest.consumption) if latest.consumption is not None else None,
+                'unit': 'kWh',
                 'fetched_at': datetime.now(timezone.utc).isoformat()
             }
             
@@ -95,7 +162,7 @@ class MeterService:
             from database import save_meter_reading_db
             save_meter_reading_db(reading)
             
-            logger.info(f"Meter reading fetched: {value} {unit}")
+            logger.info(f"Meter reading fetched: {reading['value']} {reading['unit']}")
             return reading
             
         except Exception as e:
@@ -151,6 +218,11 @@ class MeterService:
             except asyncio.CancelledError:
                 pass
             self._polling_task = None
+        
+        # Close opower session
+        if self._opower and hasattr(self._opower, '_session') and self._opower._session:
+            await self._opower._session.close()
+        
         logger.info("Meter polling stopped")
     
     async def _publish_reading(self, reading: Dict[str, Any]):
@@ -200,6 +272,14 @@ async def init_meter_service():
     config = get_meter_config_db()
     
     if config and config.get('enabled'):
+        # Decrypt password for opower
+        if config.get('password'):
+            try:
+                from main import decrypt_data
+                config['password'] = decrypt_data(config['password'])
+            except Exception:
+                pass
+        
         success = await service.initialize(config)
         if success:
             interval = config.get('polling_interval', 15)
