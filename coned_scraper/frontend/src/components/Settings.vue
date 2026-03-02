@@ -8,7 +8,8 @@
           <span>Settings Password Required</span>
         </div>
         <div class="ha-card-content">
-          <form @submit.prevent="handlePasswordSubmit">
+          <!-- Normal PIN Entry -->
+          <form v-if="!showAdminReset" @submit.prevent="handlePasswordSubmit">
             <div class="ha-form-group">
               <label class="ha-form-label">Enter 4-digit PIN</label>
               <div class="ha-pin-row">
@@ -35,6 +36,70 @@
               <button type="submit" class="ha-button ha-button-primary" :disabled="pinDigits.some(d => !d)">Unlock Settings</button>
             </div>
           </form>
+
+          <!-- Admin Reset Link (only for admin users) -->
+          <div v-if="isHaAdmin && !showAdminReset" class="ha-admin-reset-link">
+            <button type="button" class="ha-link-btn" @click="showAdminReset = true">
+              🔑 Forgot PIN? Reset as Admin
+            </button>
+          </div>
+
+          <!-- Admin Password Reset Form -->
+          <div v-if="showAdminReset" class="ha-admin-reset-form">
+            <h3 class="ha-reset-title">🔑 Admin Password Reset</h3>
+            <p class="ha-reset-desc">As an admin user, you can set a new PIN.</p>
+            <div class="ha-form-group">
+              <label class="ha-form-label">New 4-digit PIN</label>
+              <div class="ha-pin-row">
+                <input
+                  v-for="(_, i) in 4"
+                  :key="'new-' + i"
+                  :ref="el => { if (el) newPinRefs[i] = el as HTMLInputElement }"
+                  v-model="newPinDigits[i]"
+                  type="password"
+                  inputmode="numeric"
+                  maxlength="1"
+                  autocomplete="new-password"
+                  class="ha-pin-input"
+                  :class="{ error: adminResetError }"
+                  @input="onNewPinInput(i, $event)"
+                  @keydown="handleNewPinKeydown($event, i)"
+                />
+              </div>
+            </div>
+            <div class="ha-form-group">
+              <label class="ha-form-label">Confirm PIN</label>
+              <div class="ha-pin-row">
+                <input
+                  v-for="(_, i) in 4"
+                  :key="'confirm-' + i"
+                  :ref="el => { if (el) confirmPinRefs[i] = el as HTMLInputElement }"
+                  v-model="confirmPinDigits[i]"
+                  type="password"
+                  inputmode="numeric"
+                  maxlength="1"
+                  autocomplete="new-password"
+                  class="ha-pin-input"
+                  :class="{ error: adminResetError }"
+                  @input="onConfirmPinInput(i, $event)"
+                  @keydown="handleConfirmPinKeydown($event, i)"
+                />
+              </div>
+            </div>
+            <div v-if="adminResetError" class="ha-password-error">{{ adminResetError }}</div>
+            <div v-if="adminResetSuccess" class="ha-success-message">{{ adminResetSuccess }}</div>
+            <div class="ha-form-actions">
+              <button type="button" class="ha-button ha-button-gray" @click="cancelAdminReset">Back</button>
+              <button
+                type="button"
+                class="ha-button ha-button-primary"
+                :disabled="adminResetLoading || newPinDigits.some(d => !d) || confirmPinDigits.some(d => !d)"
+                @click="handleAdminReset"
+              >
+                {{ adminResetLoading ? 'Resetting...' : 'Reset PIN' }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -79,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { getApiBase } from '../lib/api-base'
 import Dashboard from './Dashboard.vue'
 import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
@@ -106,6 +171,17 @@ const isUnlocked = ref(false)
 const pinDigits = ref<string[]>(['', '', '', ''])
 const pinRefs = ref<(HTMLInputElement | null)[]>([])
 const passwordError = ref('')
+
+// Admin reset state
+const isHaAdmin = ref(false)
+const showAdminReset = ref(false)
+const newPinDigits = ref<string[]>(['', '', '', ''])
+const confirmPinDigits = ref<string[]>(['', '', '', ''])
+const newPinRefs = ref<(HTMLInputElement | null)[]>([])
+const confirmPinRefs = ref<(HTMLInputElement | null)[]>([])
+const adminResetError = ref('')
+const adminResetSuccess = ref('')
+const adminResetLoading = ref(false)
 
 const menuItems = [
   { id: 'console' as Page, icon: '📊', label: 'Console', description: 'View logs and system status' },
@@ -189,10 +265,120 @@ async function handlePasswordSubmit() {
 function cancelLock() {
   pinDigits.value = ['', '', '', '']
   passwordError.value = ''
+  showAdminReset.value = false
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('navigateToLedger'))
   }
 }
+
+// Admin reset functions
+async function checkHaAdmin() {
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings/check-ha-admin`)
+    if (res.ok) {
+      const data = await res.json()
+      isHaAdmin.value = data.is_admin === true
+    }
+  } catch {
+    isHaAdmin.value = false
+  }
+}
+
+function onNewPinInput(index: number, ev: Event) {
+  const el = ev.target as HTMLInputElement
+  const v = el.value.replace(/\D/g, '').slice(-1)
+  newPinDigits.value[index] = v
+  adminResetError.value = ''
+  adminResetSuccess.value = ''
+  if (v && index < 3) {
+    nextTick(() => newPinRefs.value[index + 1]?.focus())
+  } else if (v && index === 3) {
+    nextTick(() => confirmPinRefs.value[0]?.focus())
+  }
+}
+
+function handleNewPinKeydown(ev: KeyboardEvent, index: number) {
+  const target = ev.target as HTMLInputElement
+  if (ev.key === 'Backspace' && !target.value && index > 0) {
+    ev.preventDefault()
+    newPinDigits.value[index - 1] = ''
+    nextTick(() => newPinRefs.value[index - 1]?.focus())
+  }
+}
+
+function onConfirmPinInput(index: number, ev: Event) {
+  const el = ev.target as HTMLInputElement
+  const v = el.value.replace(/\D/g, '').slice(-1)
+  confirmPinDigits.value[index] = v
+  adminResetError.value = ''
+  adminResetSuccess.value = ''
+  if (v && index < 3) {
+    nextTick(() => confirmPinRefs.value[index + 1]?.focus())
+  }
+}
+
+function handleConfirmPinKeydown(ev: KeyboardEvent, index: number) {
+  const target = ev.target as HTMLInputElement
+  if (ev.key === 'Backspace' && !target.value && index > 0) {
+    ev.preventDefault()
+    confirmPinDigits.value[index - 1] = ''
+    nextTick(() => confirmPinRefs.value[index - 1]?.focus())
+  }
+}
+
+function cancelAdminReset() {
+  showAdminReset.value = false
+  newPinDigits.value = ['', '', '', '']
+  confirmPinDigits.value = ['', '', '', '']
+  adminResetError.value = ''
+  adminResetSuccess.value = ''
+}
+
+async function handleAdminReset() {
+  const newPin = newPinDigits.value.join('')
+  const confirmPin = confirmPinDigits.value.join('')
+
+  if (newPin.length !== 4) {
+    adminResetError.value = 'PIN must be 4 digits'
+    return
+  }
+  if (newPin !== confirmPin) {
+    adminResetError.value = 'PINs do not match'
+    return
+  }
+
+  adminResetLoading.value = true
+  adminResetError.value = ''
+  adminResetSuccess.value = ''
+
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings/ha-admin-reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPin }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      adminResetSuccess.value = 'PIN reset successfully! You can now unlock with the new PIN.'
+      newPinDigits.value = ['', '', '', '']
+      confirmPinDigits.value = ['', '', '', '']
+      setTimeout(() => {
+        showAdminReset.value = false
+        adminResetSuccess.value = ''
+      }, 2000)
+    } else {
+      adminResetError.value = data.detail || 'Failed to reset PIN'
+    }
+  } catch {
+    adminResetError.value = 'Connection error'
+  } finally {
+    adminResetLoading.value = false
+  }
+}
+
+onMounted(() => {
+  checkHaAdmin()
+})
 </script>
 
 <style scoped>
@@ -276,5 +462,47 @@ function cancelLock() {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* Admin Reset Styles */
+.ha-admin-reset-link {
+  margin-top: 1rem;
+  text-align: center;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 1rem;
+}
+.ha-link-btn {
+  background: none;
+  border: none;
+  color: #ff9800;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  padding: 0.5rem;
+}
+.ha-link-btn:hover {
+  color: #e65100;
+}
+.ha-admin-reset-form {
+  padding: 0.5rem 0;
+}
+.ha-reset-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e65100;
+}
+.ha-reset-desc {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 1rem;
+}
+.ha-success-message {
+  color: #2e7d32;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  background: #e8f5e9;
+  padding: 0.5rem;
+  border-radius: 4px;
 }
 </style>

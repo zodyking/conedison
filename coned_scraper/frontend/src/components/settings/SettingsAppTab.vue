@@ -66,24 +66,6 @@
         <button type="submit" class="ha-button ha-button-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Change Password' }}</button>
       </form>
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
-
-      <!-- Admin Password Reset (only visible to HA admin users) -->
-      <div v-if="isHaAdmin" class="ha-section ha-admin-section">
-        <h4 class="ha-section-title">🔑 Admin Password Reset</h4>
-        <p class="info-text">As an admin user, you can reset the settings password without knowing the current password.</p>
-        <div class="ha-form-group">
-          <label for="admin-new-pwd" class="ha-form-label">New Password</label>
-          <input id="admin-new-pwd" v-model="adminNewPassword" type="password" class="ha-form-input" placeholder="Enter new 4-digit PIN" autocomplete="new-password" />
-        </div>
-        <div v-if="adminNewPassword" class="ha-form-group">
-          <label for="admin-confirm-pwd" class="ha-form-label">Confirm Password</label>
-          <input id="admin-confirm-pwd" v-model="adminConfirmPassword" type="password" class="ha-form-input" placeholder="Re-enter" autocomplete="new-password" />
-        </div>
-        <button type="button" class="ha-button ha-button-primary" :disabled="adminResetLoading || !adminNewPassword" @click="handleAdminReset">
-          {{ adminResetLoading ? 'Resetting...' : 'Reset Password' }}
-        </button>
-        <div v-if="adminMessage" :class="['ha-message', adminMessage.type]">{{ adminMessage.text }}</div>
-      </div>
     </div>
   </div>
 </template>
@@ -105,13 +87,6 @@ const confirmPassword = ref('')
 const isLoading = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const pdfUrls = ref<Record<number, string>>({})
-
-// Admin reset state
-const isHaAdmin = ref(false)
-const adminNewPassword = ref('')
-const adminConfirmPassword = ref('')
-const adminResetLoading = ref(false)
-const adminMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const pdfLoading = ref(false)
 const pdfMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const bills = ref<Bill[]>([])
@@ -281,55 +256,10 @@ async function handleSave() {
   }
 }
 
-async function checkHaAdmin() {
-  try {
-    const res = await fetch(`${getApiBase()}/app-settings/check-ha-admin`)
-    if (res.ok) {
-      const data = await res.json()
-      isHaAdmin.value = data.is_admin === true
-    }
-  } catch {
-    isHaAdmin.value = false
-  }
-}
-
-async function handleAdminReset() {
-  if (!adminNewPassword.value) return
-  if (adminNewPassword.value !== adminConfirmPassword.value) {
-    adminMessage.value = { type: 'error', text: 'Passwords do not match' }
-    return
-  }
-  if (adminNewPassword.value.length < 4) {
-    adminMessage.value = { type: 'error', text: 'Password must be at least 4 characters' }
-    return
-  }
-  adminResetLoading.value = true
-  adminMessage.value = null
-  try {
-    const res = await fetch(`${getApiBase()}/app-settings/ha-admin-reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ new_password: adminNewPassword.value }),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (res.ok) {
-      adminMessage.value = { type: 'success', text: data.message || 'Password reset successfully!' }
-      adminNewPassword.value = ''
-      adminConfirmPassword.value = ''
-    } else {
-      adminMessage.value = { type: 'error', text: data.detail || 'Failed to reset password' }
-    }
-  } catch {
-    adminMessage.value = { type: 'error', text: 'Failed to connect' }
-  } finally {
-    adminResetLoading.value = false
-  }
-}
 
 let timeInterval: ReturnType<typeof setInterval>
 onMounted(() => {
   loadBills().then(() => loadBillStatuses())
-  checkHaAdmin()
   timeInterval = setInterval(() => {
     currentTime.value = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
   }, 1000)
@@ -365,6 +295,4 @@ onUnmounted(() => clearInterval(timeInterval))
 .ha-message { margin-top: 0.75rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
-.ha-admin-section { background: #fff8e1; border: 1px solid #ffcc80; border-radius: 8px; padding: 1rem; margin-top: 2rem; }
-.ha-admin-section .ha-section-title { color: #e65100; }
 </style>
