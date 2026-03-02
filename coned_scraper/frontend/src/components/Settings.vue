@@ -29,7 +29,6 @@
                 />
               </div>
               <div v-if="passwordError" class="ha-password-error">{{ passwordError }}</div>
-              <div class="ha-pin-hint">Default PIN is <strong>0000</strong>. Change in App Settings after unlocking.</div>
             </div>
             <div class="ha-form-actions">
               <button type="button" class="ha-button ha-button-gray" @click="cancelLock">Cancel</button>
@@ -235,12 +234,6 @@ function cancelLock() {
 }
 .ha-pin-input.error:focus {
   box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.2);
-}
-.ha-pin-hint {
-  font-size: 0.85rem;
-  color: #666;
-  margin-top: 1rem;
-  line-height: 1.4;
 }
 .ha-password-error { color: #d32f2f; font-size: 0.85rem; margin-top: 0.5rem; }
 .ha-form-actions { display: flex; gap: 0.5rem; }

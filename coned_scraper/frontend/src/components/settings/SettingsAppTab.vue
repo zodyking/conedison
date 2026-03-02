@@ -44,6 +44,9 @@
 
         <div v-if="billsWithPdf.length" class="ha-pdf-actions-row">
           <button type="button" class="ha-btn ha-btn-purple" :disabled="pdfLoading" @click="handleSendMqtt">Send MQTT</button>
+          <button type="button" class="ha-btn ha-btn-blue" :disabled="reparseLoading" @click="handleReparseAll">
+            {{ reparseLoading ? 'Parsing...' : '🔄 Re-parse All PDFs' }}
+          </button>
         </div>
         <div class="info-text" v-if="billsWithPdf.length">PDF URLs use your Home Assistant external URL</div>
         <div v-if="pdfMessage" :class="['ha-message', pdfMessage.type]">{{ pdfMessage.text }}</div>
@@ -88,6 +91,7 @@ const pdfLoading = ref(false)
 const pdfMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const bills = ref<Bill[]>([])
 const billStatuses = ref<Record<number, { size_kb: number }>>({})
+const reparseLoading = ref(false)
 
 const billsWithPdf = computed(() =>
   bills.value.filter((b) => b.pdf_exists).map((b) => ({
@@ -196,6 +200,24 @@ async function handleSendMqtt() {
     pdfMessage.value = { type: 'error', text: 'Failed' }
   } finally {
     pdfLoading.value = false
+  }
+}
+
+async function handleReparseAll() {
+  reparseLoading.value = true
+  pdfMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/bill-details/reparse-all`, { method: 'POST' })
+    const data = await res.json()
+    if (res.ok) {
+      pdfMessage.value = { type: 'success', text: data.message || 'All PDFs re-parsed' }
+    } else {
+      pdfMessage.value = { type: 'error', text: data.detail || 'Failed to re-parse' }
+    }
+  } catch {
+    pdfMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    reparseLoading.value = false
   }
 }
 

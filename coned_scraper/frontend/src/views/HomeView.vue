@@ -15,6 +15,14 @@
             <span>Account Ledger</span>
           </button>
           <button
+            :class="['ha-nav-button', { active: activeTab === 'history' }]"
+            aria-label="History"
+            @click="activeTab = 'history'"
+          >
+            <span class="ha-nav-icon">📊</span>
+            <span>History</span>
+          </button>
+          <button
             :class="['ha-nav-button', { active: activeTab === 'settings' }]"
             aria-label="Settings"
             @click="activeTab = 'settings'"
@@ -33,6 +41,7 @@
         v-if="activeTab === 'account-ledger'"
         @navigate="onNavigate"
       />
+      <History v-if="activeTab === 'history'" />
       <Settings v-if="activeTab === 'settings'" />
     </div>
   </div>
@@ -41,10 +50,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import AccountLedger from '../components/AccountLedger.vue'
+import History from '../components/History.vue'
 import Settings from '../components/Settings.vue'
 import { logoUrl } from '../lib/assets'
 
-const activeTab = ref<'account-ledger' | 'settings'>('account-ledger')
+const activeTab = ref<'account-ledger' | 'history' | 'settings'>('account-ledger')
 
 function onNavigate(tab: 'console' | 'settings') {
   activeTab.value = tab === 'console' ? 'settings' : tab

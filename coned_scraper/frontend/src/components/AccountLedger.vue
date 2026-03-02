@@ -61,7 +61,7 @@
             </div>
             <div class="ha-summary-info">
               <div class="ha-summary-label">Last Payment</div>
-              <div class="ha-summary-value ha-payment-text">{{ ledgerData.latest_payment?.amount || '—' }}</div>
+              <div class="ha-summary-value ha-payment-text">{{ ledgerData.latest_payment?.amount || 'No payment made' }}</div>
               <div class="ha-summary-sub">{{ ledgerData.latest_payment?.payment_date || '' }}</div>
             </div>
             <div class="ha-summary-info">

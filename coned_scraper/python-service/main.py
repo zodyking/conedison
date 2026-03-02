@@ -202,6 +202,16 @@ async def run_scheduled_scrape():
                     if should_pub and last_payment:
                         add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
+                        
+                        # Trigger TTS for new payment (scheduled scrape)
+                        try:
+                            from tts_scheduler import trigger_payment_received_tts
+                            payment_amount = last_payment.get("amount", "")
+                            current_balance = scraped_data.get("account_balance", "")
+                            payee_name = last_payment.get("payee_name", "")
+                            await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
+                        except Exception as tts_e:
+                            add_log("warning", f"Failed to trigger payment TTS: {tts_e}")
                     else:
                         add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
@@ -349,6 +359,21 @@ async def startup_event():
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
         add_log("info", f"Scheduler started with {schedule['frequency']}s frequency")
+    
+    # Start TTS scheduler
+    try:
+        from tts_scheduler import get_scheduler
+        tts_scheduler = get_scheduler()
+        await tts_scheduler.start()
+        add_log("info", "TTS scheduler started")
+    except Exception as e:
+        add_log("warning", f"TTS scheduler initialization failed: {e}")
+    
+    # Publish bill details sensors on startup (due date, kWh cost)
+    try:
+        await _publish_bill_details_sensors()
+    except Exception as e:
+        add_log("warning", f"Failed to publish bill details sensors on startup: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -359,6 +384,14 @@ async def shutdown_event():
             await _scheduler_task
         except asyncio.CancelledError:
             pass
+    
+    # Stop TTS scheduler
+    try:
+        from tts_scheduler import get_scheduler
+        tts_scheduler = get_scheduler()
+        await tts_scheduler.stop()
+    except Exception:
+        pass
 
 class CredentialsModel(BaseModel):
     username: str
@@ -470,25 +503,28 @@ def save_last_payment_state(state: dict):
 def should_publish_last_payment() -> tuple:
     """
     Check if we should publish last_payment to MQTT.
-    Returns (should_publish: bool, last_payment_data: dict, reason: str)
+    Returns (should_publish: bool, last_payment_data: dict or None, reason: str)
     
     Only publish when:
     1. Payment count for most recent bill increased (new payment added)
     2. Manual audit changed WHICH payment is the "last" one (different payment ID)
     3. New billing cycle started
+    4. First time publishing (no previous state) - including "no payment" state
     
     Does NOT publish when:
     - Just payee attribution changed (payee doesn't affect last_payment MQTT)
     - Order changed but same payment is still "last"
     """
-    from database import get_most_recent_bill_payment_count
+    from database import get_most_recent_bill_payment_count, get_latest_payment
     
     current_state = get_most_recent_bill_payment_count()
     previous_state = load_last_payment_state()
     
     current_bill_id = current_state.get("bill_id")
     current_count = current_state.get("payment_count", 0)
-    last_payment = current_state.get("last_payment")
+    
+    # Use get_latest_payment() to get the actual latest payment across all bills
+    latest_payment = get_latest_payment()
     
     previous_bill_id = previous_state.get("bill_id")
     previous_count = previous_state.get("payment_count", 0)
@@ -498,11 +534,25 @@ def should_publish_last_payment() -> tuple:
     should_publish = False
     reason = ""
     
-    if not last_payment:
-        return False, None, "No payments found"
+    # Handle no payments case
+    if not latest_payment:
+        # Check if we've published "no payment" state before
+        if previous_last_payment_id is None and previous_state.get("bill_id") is not None:
+            return False, None, "No payments found (already published)"
+        # First time or state reset - publish "no payment" state
+        if current_bill_id is not None:
+            new_state = {
+                "bill_id": current_bill_id,
+                "payment_count": 0,
+                "last_payment_id": None,
+                "last_payment_amount": None
+            }
+            save_last_payment_state(new_state)
+            return True, None, "No payments - publishing empty state"
+        return False, None, "No bills or payments found"
     
-    current_last_id = last_payment.get("id")
-    current_last_amount = last_payment.get("amount")
+    current_last_id = latest_payment.get("id")
+    current_last_amount = latest_payment.get("amount")
     
     # Case 1: New billing cycle
     if current_bill_id != previous_bill_id:
@@ -535,7 +585,7 @@ def should_publish_last_payment() -> tuple:
     }
     save_last_payment_state(new_state)
     
-    return should_publish, last_payment, reason
+    return should_publish, latest_payment, reason
 
 def save_app_settings(settings: dict):
     """Save app settings (time offset, password) to file"""
@@ -731,6 +781,16 @@ async def start_scraper():
                     if should_pub and last_payment:
                         add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
+                        
+                        # Trigger TTS for new payment (manual scrape)
+                        try:
+                            from tts_scheduler import trigger_payment_received_tts
+                            payment_amount = last_payment.get("amount", "")
+                            current_balance = scraped_data.get("account_balance", "")
+                            payee_name = last_payment.get("payee_name", "")
+                            await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
+                        except Exception as tts_e:
+                            add_log("warning", f"Failed to trigger payment TTS: {tts_e}")
                     else:
                         add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
@@ -885,6 +945,40 @@ async def verify_password_endpoint(data: PasswordVerifyModel):
     except Exception as e:
         add_log("error", f"Failed to verify password: {str(e)}")
         return {"valid": False}
+
+class AdminResetPasswordModel(BaseModel):
+    user_id: int
+    new_password: str
+
+@app.post("/api/app-settings/admin-reset-password")
+async def admin_reset_password_endpoint(data: AdminResetPasswordModel):
+    """Reset settings password (admin only)"""
+    from database import get_admin_users
+    
+    admin_users = get_admin_users()
+    admin_ids = {u['id'] for u in admin_users}
+    
+    if data.user_id not in admin_ids:
+        raise HTTPException(status_code=403, detail="Only admin users can reset the password")
+    
+    if len(data.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    
+    try:
+        settings = load_app_settings()
+        settings['settings_password'] = data.new_password
+        save_app_settings(settings)
+        add_log("info", f"Settings password reset by admin user {data.user_id}")
+        return {"success": True, "message": "Password reset successfully"}
+    except Exception as e:
+        add_log("error", f"Failed to reset password: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to reset password")
+
+@app.get("/api/app-settings/admin-users")
+async def get_admin_users_endpoint():
+    """Get list of admin users"""
+    from database import get_admin_users
+    return {"admin_users": get_admin_users()}
 
 @app.get("/api/logs")
 async def get_logs_endpoint(limit: int = 100):
@@ -1073,6 +1167,20 @@ async def _download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
     upsert_bill_document(bill_id, f"bills/bill_{bill_id}.pdf", source_url=pdf_url)
     size_kb = round(len(pdf_content) / 1024, 1)
     add_log("success", f"PDF saved for bill {bill_id}: {size_kb} KB")
+    
+    # Parse PDF and extract bill details
+    try:
+        from pdf_parser import parse_coned_bill_pdf
+        from database import upsert_bill_details
+        parsed_data = parse_coned_bill_pdf(str(pdf_path))
+        if "error" not in parsed_data:
+            upsert_bill_details(bill_id, parsed_data)
+            add_log("info", f"Parsed bill details: kWh={parsed_data.get('kwh_used')}, due={parsed_data.get('due_date')}")
+        else:
+            add_log("warning", f"PDF parsing error: {parsed_data.get('error')}")
+    except Exception as parse_e:
+        add_log("warning", f"Failed to parse PDF: {parse_e}")
+    
     return {"success": True, "message": f"PDF saved ({size_kb} KB)", "size_bytes": len(pdf_content)}
 
 @app.post("/api/bills/{bill_id}/pdf/download")
@@ -1086,6 +1194,7 @@ async def download_bill_pdf_for_period(bill_id: int, request: PdfDownloadRequest
         raise HTTPException(status_code=400, detail="PDF URL is required")
     result = await _download_and_store_pdf(pdf_url, bill_id)
     await _publish_bill_pdf_mqtt()
+    await _publish_bill_details_sensors()
     return result
 
 @app.post("/api/latest-bill-pdf/download")
@@ -1100,7 +1209,18 @@ async def download_bill_pdf(request: PdfDownloadRequest):
     bill_id = bills[0]['id']
     result = await _download_and_store_pdf(pdf_url, bill_id)
     await _publish_bill_pdf_mqtt()
+    await _publish_bill_details_sensors()
     return result
+
+
+async def _publish_bill_details_sensors():
+    """Publish due_date, kwh_cost, kwh_used sensors via MQTT"""
+    global mqtt_client
+    if mqtt_client and mqtt_client.enabled:
+        try:
+            await mqtt_client.publish_bill_details_sensors()
+        except Exception as e:
+            add_log("warning", f"Failed to publish bill details sensors: {e}")
 
 async def _get_ha_external_base_url() -> str | None:
     """Get Home Assistant external URL when running as addon. Returns base URL for addon ingress or None."""
@@ -1110,6 +1230,7 @@ async def _get_ha_external_base_url() -> str | None:
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
+            # Get external URL from HA config
             async with session.get(
                 "http://supervisor/core/api/config",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1120,7 +1241,30 @@ async def _get_ha_external_base_url() -> str | None:
                 external = (data.get("external_url") or "").rstrip("/")
                 if not external:
                     return None
-                return f"{external}/api/hassio_ingress/coned_scraper"
+            
+            # Get the addon's ingress token from supervisor
+            async with session.get(
+                "http://supervisor/addons/self/info",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    add_log("debug", f"Could not get addon info: HTTP {resp.status}")
+                    return None
+                addon_data = await resp.json()
+                addon_info = addon_data.get("data", {})
+                ingress_entry = addon_info.get("ingress_entry", "")
+                
+                # ingress_entry is like "/api/hassio_ingress/glF8P3O4ySwGrxsHqRBRAOBvR1VRauNQXhAfmqyCCSs"
+                if ingress_entry:
+                    return f"{external}{ingress_entry}"
+                
+                # Fallback: try ingress_token directly
+                ingress_token = addon_info.get("ingress_token", "")
+                if ingress_token:
+                    return f"{external}/api/hassio_ingress/{ingress_token}"
+                
+                add_log("debug", "No ingress_entry or ingress_token found in addon info")
+                return None
     except Exception as e:
         add_log("debug", f"Could not get HA external URL: {e}")
         return None
@@ -1175,7 +1319,115 @@ async def _delete_bill_pdf_by_id(bill_id: int):
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
         add_log("info", "Bill PDF deleted")
+    
+    # Also delete parsed bill details
+    from database import delete_bill_details
+    delete_bill_details(bill_id)
+    
     return {"success": True, "message": "PDF deleted"}
+
+
+# ========== Bill Details & History API ==========
+
+@app.get("/api/bills/{bill_id}/details")
+async def get_bill_details_endpoint(bill_id: int):
+    """Get parsed bill details for a specific bill"""
+    from database import get_bill_details
+    details = get_bill_details(bill_id)
+    if not details:
+        raise HTTPException(status_code=404, detail="Bill details not found. Upload PDF first.")
+    return details
+
+@app.post("/api/bills/{bill_id}/parse-pdf")
+async def parse_bill_pdf_endpoint(bill_id: int):
+    """Re-parse an existing bill PDF"""
+    from database import get_bill_document, upsert_bill_details
+    from pdf_parser import parse_coned_bill_pdf
+    
+    doc = get_bill_document(bill_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="No PDF found for this bill")
+    
+    pdf_path = DATA_DIR / doc["pdf_path"]
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF file missing")
+    
+    parsed_data = parse_coned_bill_pdf(str(pdf_path))
+    if "error" in parsed_data:
+        raise HTTPException(status_code=500, detail=parsed_data["error"])
+    
+    upsert_bill_details(bill_id, parsed_data)
+    add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
+    return {"success": True, "details": parsed_data}
+
+@app.get("/api/bill-history")
+async def get_bill_history_endpoint():
+    """Get bill history data for graphing"""
+    from database import get_bill_history_for_graph
+    history = get_bill_history_for_graph()
+    return {"history": history}
+
+@app.get("/api/bill-details/all")
+async def get_all_bill_details_endpoint():
+    """Get all bill details"""
+    from database import get_all_bill_details
+    details = get_all_bill_details()
+    return {"details": details}
+
+@app.get("/api/bill-details/latest")
+async def get_latest_bill_details_endpoint():
+    """Get the latest bill with its details (for sensors)"""
+    from database import get_latest_bill_with_details
+    latest = get_latest_bill_with_details()
+    if not latest:
+        return {"bill": None, "due_date": None, "kwh_cost": None}
+    return {
+        "bill": latest,
+        "due_date": latest.get("due_date"),
+        "kwh_cost": latest.get("kwh_cost"),
+        "kwh_used": latest.get("kwh_used")
+    }
+
+@app.post("/api/bill-details/reparse-all")
+async def reparse_all_bill_pdfs():
+    """Re-parse all existing bill PDFs to extract/update bill details"""
+    from database import get_all_bill_documents_with_periods, upsert_bill_details
+    from pdf_parser import parse_coned_bill_pdf
+    
+    docs = get_all_bill_documents_with_periods()
+    results = {"success": 0, "failed": 0, "errors": []}
+    
+    for doc in docs:
+        bill_id = doc["bill_id"]
+        pdf_path = DATA_DIR / doc["pdf_path"]
+        
+        if not os.path.exists(pdf_path):
+            results["failed"] += 1
+            results["errors"].append(f"Bill {bill_id}: PDF file missing")
+            continue
+        
+        try:
+            parsed_data = parse_coned_bill_pdf(str(pdf_path))
+            if "error" in parsed_data:
+                results["failed"] += 1
+                results["errors"].append(f"Bill {bill_id}: {parsed_data['error']}")
+            else:
+                upsert_bill_details(bill_id, parsed_data)
+                results["success"] += 1
+                add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append(f"Bill {bill_id}: {str(e)}")
+    
+    # Publish updated sensors
+    await _publish_bill_details_sensors()
+    
+    return {
+        "success": True,
+        "message": f"Parsed {results['success']} bills, {results['failed']} failed",
+        "details": results
+    }
+
 
 @app.get("/api/live-preview")
 async def get_live_preview():
@@ -1340,6 +1592,7 @@ class PayeeUserModel(BaseModel):
 class PayeeUserUpdateModel(BaseModel):
     name: Optional[str] = None
     is_default: Optional[bool] = None
+    is_admin: Optional[bool] = None
 
 class UserCardModel(BaseModel):
     user_id: int
@@ -1407,7 +1660,7 @@ async def update_responsibilities(request: Request):
 async def update_user(user_id: int, user: PayeeUserUpdateModel):
     """Update a payee user"""
     try:
-        update_payee_user(user_id, user.name, user.is_default)
+        update_payee_user(user_id, user.name, user.is_default, user.is_admin)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1918,6 +2171,55 @@ async def test_tts():
         )
         return {"success": True, "message": "TTS request sent via MQTT. Add HA automation if not using addon."}
     raise HTTPException(status_code=400, detail="Not in HA addon and MQTT not configured")
+
+
+# ========== TTS Schedule Endpoints ==========
+
+class TTSScheduleTimeModel(BaseModel):
+    time: str  # "HH:MM" format
+    days: Optional[list] = None  # List of day abbreviations: ["mon", "tue", ...]
+
+class TTSScheduleModel(BaseModel):
+    enabled: Optional[bool] = None
+    schedule_times: Optional[list] = None  # List of TTSScheduleTimeModel dicts
+    schedule_type: Optional[str] = None  # "daily" or "specific_days"
+
+@app.get("/api/tts-schedule")
+async def get_tts_schedule():
+    """Get TTS schedule configuration"""
+    from tts_scheduler import get_scheduler
+    scheduler = get_scheduler()
+    return scheduler.load_schedule_config()
+
+@app.post("/api/tts-schedule")
+async def save_tts_schedule_endpoint(config: TTSScheduleModel):
+    """Save TTS schedule configuration"""
+    from tts_scheduler import get_scheduler
+    scheduler = get_scheduler()
+    current = scheduler.load_schedule_config()
+    updates = config.model_dump(exclude_none=True)
+    for k, v in updates.items():
+        current[k] = v
+    scheduler.save_schedule_config(current)
+    
+    # Restart scheduler to apply new schedule
+    await scheduler.stop()
+    await scheduler.start()
+    
+    return {"success": True}
+
+@app.post("/api/tts/trigger-bill-summary")
+async def trigger_bill_summary_tts():
+    """Manually trigger a bill summary TTS"""
+    from tts_scheduler import get_scheduler
+    scheduler = get_scheduler()
+    tts_config = scheduler.load_tts_config()
+    
+    if not tts_config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    
+    await scheduler._send_scheduled_tts(tts_config)
+    return {"success": True, "message": "Bill summary TTS triggered"}
 
 
 # ========== SPA Static Files & Fallback ==========

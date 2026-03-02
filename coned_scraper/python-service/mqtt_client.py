@@ -254,6 +254,46 @@ class MQTTClient:
                     "device": device,
                 },
             },
+            {
+                "topic": f"{dp}/sensor/coned_due_date/config",
+                "payload": {
+                    "name": "ConEd Due Date",
+                    "unique_id": "coned_due_date",
+                    "state_topic": f"{bt}/due_date",
+                    "value_template": "{{ value }}",
+                    "icon": "mdi:calendar-clock",
+                    "json_attributes_topic": f"{bt}/due_date_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_kwh_cost/config",
+                "payload": {
+                    "name": "ConEd kWh Cost",
+                    "unique_id": "coned_kwh_cost",
+                    "state_topic": f"{bt}/kwh_cost",
+                    "unit_of_measurement": "$/kWh",
+                    "icon": "mdi:lightning-bolt",
+                    "json_attributes_topic": f"{bt}/kwh_cost_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_kwh_used/config",
+                "payload": {
+                    "name": "ConEd kWh Used",
+                    "unique_id": "coned_kwh_used",
+                    "state_topic": f"{bt}/kwh_used",
+                    "unit_of_measurement": "kWh",
+                    "device_class": "energy",
+                    "icon": "mdi:flash",
+                    "json_attributes_topic": f"{bt}/kwh_used_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
         ]
         try:
             for cfg in configs:
@@ -380,21 +420,36 @@ class MQTTClient:
         }
         await self.publish("previous_bill", numeric_value, json_payload)
     
-    async def publish_last_payment(self, payment_data: Dict[str, Any], timestamp: Optional[str] = None):
-        """Publish last payment update"""
-        numeric_value = self._extract_numeric(payment_data.get("amount", "0"))
-        json_payload = {
-            "event_type": "last_payment",
-            "timestamp": timestamp or utc_now_iso(),
-            "data": {
-                "amount": payment_data.get("amount"),
-                "payment_date": payment_data.get("payment_date"),
-                "bill_cycle_date": payment_data.get("bill_cycle_date"),
-                "description": payment_data.get("description"),
-                "timestamp": timestamp or utc_now_iso()
+    async def publish_last_payment(self, payment_data: Optional[Dict[str, Any]], timestamp: Optional[str] = None):
+        """Publish last payment update. If payment_data is None, publishes 'No payment made' state."""
+        if payment_data is None:
+            # No payment exists
+            json_payload = {
+                "event_type": "last_payment",
+                "timestamp": timestamp or utc_now_iso(),
+                "data": {
+                    "amount": "No payment made",
+                    "payment_date": None,
+                    "bill_cycle_date": None,
+                    "description": "No payments recorded",
+                    "timestamp": timestamp or utc_now_iso()
+                }
             }
-        }
-        await self.publish("last_payment", numeric_value, json_payload)
+            await self.publish("last_payment", 0, json_payload)
+        else:
+            numeric_value = self._extract_numeric(payment_data.get("amount", "0"))
+            json_payload = {
+                "event_type": "last_payment",
+                "timestamp": timestamp or utc_now_iso(),
+                "data": {
+                    "amount": payment_data.get("amount"),
+                    "payment_date": payment_data.get("payment_date"),
+                    "bill_cycle_date": payment_data.get("bill_cycle_date"),
+                    "description": payment_data.get("description"),
+                    "timestamp": timestamp or utc_now_iso()
+                }
+            }
+            await self.publish("last_payment", numeric_value, json_payload)
     
     async def publish_tts_request(
         self,
@@ -439,6 +494,60 @@ class MQTTClient:
             "data": {"pdf_url": pdf_url, "all_bills": {}, "timestamp": timestamp or utc_now_iso()}
         }
         await self.publish("bill_pdf_url", pdf_url, json_payload)
+
+    async def publish_due_date(self, due_date: Optional[str], timestamp: Optional[str] = None):
+        """Publish bill due date"""
+        state = due_date or "Unknown"
+        json_payload = {
+            "event_type": "due_date",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "due_date": due_date,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("due_date", state, json_payload)
+
+    async def publish_kwh_cost(self, kwh_cost: Optional[float], kwh_used: Optional[float] = None, timestamp: Optional[str] = None):
+        """Publish kWh cost (cost per kWh)"""
+        cost_value = round(kwh_cost, 4) if kwh_cost else 0
+        json_payload = {
+            "event_type": "kwh_cost",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "kwh_cost": cost_value,
+                "kwh_used": kwh_used,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("kwh_cost", cost_value, json_payload)
+
+    async def publish_kwh_used(self, kwh_used: Optional[float], timestamp: Optional[str] = None):
+        """Publish kWh used for the billing period"""
+        usage_value = round(kwh_used, 2) if kwh_used else 0
+        json_payload = {
+            "event_type": "kwh_used",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "kwh_used": usage_value,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("kwh_used", usage_value, json_payload)
+
+    async def publish_bill_details_sensors(self, timestamp: Optional[str] = None):
+        """Publish due_date, kwh_cost, kwh_used from latest bill details"""
+        try:
+            from database import get_latest_bill_with_details
+            latest = get_latest_bill_with_details()
+            if latest:
+                ts = timestamp or utc_now_iso()
+                await self.publish_due_date(latest.get("due_date"), ts)
+                await self.publish_kwh_cost(latest.get("kwh_cost"), latest.get("kwh_used"), ts)
+                await self.publish_kwh_used(latest.get("kwh_used"), ts)
+                logger.info(f"Published bill details sensors: due={latest.get('due_date')}, kwh_cost={latest.get('kwh_cost')}")
+        except Exception as e:
+            logger.warning(f"Failed to publish bill details sensors: {e}")
 
     async def publish_bill_pdf_url_all(self, base_url: str, timestamp: Optional[str] = None):
         """Publish bill PDF URLs: state=latest, attributes=all period links"""

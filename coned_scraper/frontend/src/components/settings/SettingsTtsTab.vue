@@ -123,6 +123,67 @@
         </button>
       </details>
 
+      <details class="ha-tts-section">
+        <summary>Scheduled TTS Announcements</summary>
+        <p class="ha-message-desc">
+          Schedule automatic bill summary announcements at specific times.
+        </p>
+        
+        <div class="ha-form-row">
+          <label class="ha-toggle-wrap">
+            <input v-model="scheduleEnabled" type="checkbox" class="ha-toggle" />
+            <span class="ha-toggle-slider"></span>
+            <span class="ha-toggle-label">Enable Scheduled TTS</span>
+          </label>
+        </div>
+
+        <div v-if="scheduleEnabled" class="ha-schedule-config">
+          <div v-for="(item, idx) in scheduleTimes" :key="idx" class="ha-schedule-item">
+            <div class="ha-form-group">
+              <label class="ha-form-label">Time</label>
+              <input
+                v-model="item.time"
+                type="time"
+                class="ha-form-input ha-time-input"
+              />
+            </div>
+            <div class="ha-form-group ha-days-group">
+              <label class="ha-form-label">Days</label>
+              <div class="ha-days-row">
+                <label v-for="day in dayOptions" :key="day.value" class="ha-day-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="item.days?.includes(day.value)"
+                    @change="toggleDay(idx, day.value)"
+                  />
+                  <span>{{ day.label }}</span>
+                </label>
+              </div>
+            </div>
+            <button type="button" class="ha-btn ha-btn-red ha-btn-sm" @click="removeScheduleTime(idx)">✕</button>
+          </div>
+          
+          <button type="button" class="ha-button ha-button-secondary" @click="addScheduleTime">
+            + Add Schedule Time
+          </button>
+        </div>
+
+        <div class="ha-schedule-actions">
+          <button type="button" class="ha-button ha-button-primary" :disabled="scheduleLoading" @click="handleSaveSchedule">
+            {{ scheduleLoading ? 'Saving...' : 'Save Schedule' }}
+          </button>
+          <button
+            type="button"
+            class="ha-button ha-btn-test"
+            :disabled="!enabled || !mediaPlayer.trim() || billSummaryLoading"
+            @click="handleTestBillSummary"
+          >
+            {{ billSummaryLoading ? 'Sending...' : 'Test Bill Summary' }}
+          </button>
+        </div>
+        <div v-if="scheduleMessage" :class="['ha-message', scheduleMessage.type]">{{ scheduleMessage.text }}</div>
+      </details>
+
       <div class="ha-tts-actions">
         <button
           type="button"
@@ -158,6 +219,23 @@ const messages = ref<Record<string, string>>({
 const isLoading = ref(false)
 const testLoading = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+
+// Schedule state
+const scheduleEnabled = ref(false)
+const scheduleTimes = ref<Array<{ time: string; days: string[] }>>([])
+const scheduleLoading = ref(false)
+const scheduleMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const billSummaryLoading = ref(false)
+
+const dayOptions = [
+  { value: 'mon', label: 'Mon' },
+  { value: 'tue', label: 'Tue' },
+  { value: 'wed', label: 'Wed' },
+  { value: 'thu', label: 'Thu' },
+  { value: 'fri', label: 'Fri' },
+  { value: 'sat', label: 'Sat' },
+  { value: 'sun', label: 'Sun' },
+]
 
 const messageEntries = computed(() => Object.keys(messages.value))
 
@@ -254,7 +332,86 @@ async function handleTest() {
   }
 }
 
-onMounted(loadConfig)
+async function loadScheduleConfig() {
+  try {
+    const res = await fetch(`${getApiBase()}/tts-schedule`)
+    if (res.ok) {
+      const data = await res.json()
+      scheduleEnabled.value = data.enabled ?? false
+      scheduleTimes.value = data.schedule_times ?? []
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+function addScheduleTime() {
+  scheduleTimes.value.push({ time: '08:00', days: ['mon', 'tue', 'wed', 'thu', 'fri'] })
+}
+
+function removeScheduleTime(idx: number) {
+  scheduleTimes.value.splice(idx, 1)
+}
+
+function toggleDay(idx: number, day: string) {
+  const item = scheduleTimes.value[idx]
+  if (!item.days) item.days = []
+  const dayIdx = item.days.indexOf(day)
+  if (dayIdx >= 0) {
+    item.days.splice(dayIdx, 1)
+  } else {
+    item.days.push(day)
+  }
+}
+
+async function handleSaveSchedule() {
+  scheduleLoading.value = true
+  scheduleMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts-schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: scheduleEnabled.value,
+        schedule_times: scheduleTimes.value,
+      }),
+    })
+    if (res.ok) {
+      scheduleMessage.value = { type: 'success', text: 'Schedule saved' }
+    } else {
+      const err = await res.json().catch(() => ({}))
+      scheduleMessage.value = { type: 'error', text: err.detail || 'Failed to save' }
+    }
+  } catch {
+    scheduleMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    scheduleLoading.value = false
+  }
+}
+
+async function handleTestBillSummary() {
+  if (!enabled.value || !mediaPlayer.value.trim()) return
+  billSummaryLoading.value = true
+  scheduleMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/trigger-bill-summary`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      scheduleMessage.value = { type: 'success', text: data.message || 'Bill summary TTS sent' }
+    } else {
+      scheduleMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    scheduleMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    billSummaryLoading.value = false
+  }
+}
+
+onMounted(() => {
+  loadConfig()
+  loadScheduleConfig()
+})
 </script>
 
 <style scoped>
@@ -423,4 +580,78 @@ onMounted(loadConfig)
 .ha-message.error { background: #ffebee; color: #c62828; }
 
 .ha-input-mono { font-family: ui-monospace, monospace; }
+
+/* Schedule styles */
+.ha-schedule-config {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.ha-schedule-item {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem;
+  background: #f5f5f5;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.ha-time-input {
+  width: 120px;
+}
+
+.ha-days-group {
+  flex: 1;
+}
+
+.ha-days-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ha-day-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.ha-day-checkbox:has(input:checked) {
+  background: #e3f2fd;
+  border-color: #03a9f4;
+}
+
+.ha-day-checkbox input {
+  margin: 0;
+}
+
+.ha-btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.ha-btn-red {
+  background: #f44336 !important;
+  color: white !important;
+}
+
+.ha-button-secondary {
+  background: #e0e0e0 !important;
+  color: #333 !important;
+}
+
+.ha-schedule-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
 </style>

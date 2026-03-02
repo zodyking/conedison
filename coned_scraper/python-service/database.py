@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import hashlib
 
+logger = logging.getLogger(__name__)
+
 def utc_now_iso() -> str:
     """Get current UTC time as ISO string"""
     return datetime.now(timezone.utc).isoformat()
@@ -162,6 +164,12 @@ def init_database():
     except sqlite3.OperationalError:
         pass
     
+    # Add is_admin column if it doesn't exist (migration)
+    try:
+        cursor.execute('ALTER TABLE payee_users ADD COLUMN is_admin INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    
     # User cards - card endings linked to users
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_cards (
@@ -187,7 +195,30 @@ def init_database():
         )
     ''')
     
+    # Bill details - parsed data from PDF
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bill_details (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_id INTEGER NOT NULL UNIQUE,
+            due_date TEXT,
+            total_from_billing_period REAL,
+            balance_from_previous_bill REAL DEFAULT 0,
+            total_amount_due REAL,
+            kwh_used REAL,
+            kwh_cost REAL,
+            electricity_total REAL,
+            billing_period_start TEXT,
+            billing_period_end TEXT,
+            billing_days INTEGER,
+            supply_charges_json TEXT,
+            delivery_charges_json TEXT,
+            parsed_at TEXT NOT NULL,
+            FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
+        )
+    ''')
+    
     # Create indexes for performance
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bill_details_bill_id ON bill_details(bill_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_bills_cycle_date ON bills(bill_cycle_date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_bill_documents_bill_id ON bill_documents(bill_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)')
@@ -383,6 +414,218 @@ def delete_bill_document(bill_id: int) -> bool:
     conn.close()
     return deleted
 
+
+# ==========================================
+# BILL DETAILS (Parsed PDF Data)
+# ==========================================
+
+def upsert_bill_details(bill_id: int, details: Dict[str, Any]) -> bool:
+    """Store or update parsed bill details from PDF"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    supply_json = json.dumps(details.get("supply_charges", {}))
+    delivery_json = json.dumps(details.get("delivery_charges", {}))
+    
+    try:
+        cursor.execute('''
+            INSERT INTO bill_details (
+                bill_id, due_date, total_from_billing_period, balance_from_previous_bill,
+                total_amount_due, kwh_used, kwh_cost, electricity_total,
+                billing_period_start, billing_period_end, billing_days,
+                supply_charges_json, delivery_charges_json, parsed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bill_id) DO UPDATE SET
+                due_date = excluded.due_date,
+                total_from_billing_period = excluded.total_from_billing_period,
+                balance_from_previous_bill = excluded.balance_from_previous_bill,
+                total_amount_due = excluded.total_amount_due,
+                kwh_used = excluded.kwh_used,
+                kwh_cost = excluded.kwh_cost,
+                electricity_total = excluded.electricity_total,
+                billing_period_start = excluded.billing_period_start,
+                billing_period_end = excluded.billing_period_end,
+                billing_days = excluded.billing_days,
+                supply_charges_json = excluded.supply_charges_json,
+                delivery_charges_json = excluded.delivery_charges_json,
+                parsed_at = excluded.parsed_at
+        ''', (
+            bill_id,
+            details.get("due_date"),
+            details.get("total_from_billing_period"),
+            details.get("balance_from_previous_bill", 0),
+            details.get("total_amount_due"),
+            details.get("kwh_used"),
+            details.get("kwh_cost"),
+            details.get("electricity_total"),
+            details.get("billing_period_start"),
+            details.get("billing_period_end"),
+            details.get("billing_days"),
+            supply_json,
+            delivery_json,
+            details.get("parsed_at", utc_now_iso())
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upsert bill details: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_bill_details(bill_id: int) -> Optional[Dict[str, Any]]:
+    """Get parsed bill details for a specific bill"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM bill_details WHERE bill_id = ?', (bill_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    result = dict(row)
+    # Parse JSON fields
+    try:
+        result["supply_charges"] = json.loads(result.get("supply_charges_json") or "{}")
+    except:
+        result["supply_charges"] = {}
+    try:
+        result["delivery_charges"] = json.loads(result.get("delivery_charges_json") or "{}")
+    except:
+        result["delivery_charges"] = {}
+    
+    return result
+
+
+def get_all_bill_details() -> List[Dict[str, Any]]:
+    """Get all bill details for history/graphing"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bd.*, b.month_range, b.bill_cycle_date, b.bill_total as scraped_bill_total
+        FROM bill_details bd
+        JOIN bills b ON bd.bill_id = b.id
+        ORDER BY b.bill_cycle_date DESC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        result = dict(row)
+        try:
+            result["supply_charges"] = json.loads(result.get("supply_charges_json") or "{}")
+        except:
+            result["supply_charges"] = {}
+        try:
+            result["delivery_charges"] = json.loads(result.get("delivery_charges_json") or "{}")
+        except:
+            result["delivery_charges"] = {}
+        results.append(result)
+    
+    return results
+
+
+def get_bill_history_for_graph() -> List[Dict[str, Any]]:
+    """Get simplified bill history data for graphing"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 
+            b.id as bill_id,
+            b.month_range,
+            b.bill_cycle_date,
+            b.bill_total,
+            b.amount_numeric,
+            bd.kwh_used,
+            bd.kwh_cost,
+            bd.electricity_total,
+            bd.total_from_billing_period,
+            bd.billing_days,
+            bd.supply_charges_json,
+            bd.delivery_charges_json
+        FROM bills b
+        LEFT JOIN bill_details bd ON b.id = bd.bill_id
+        ORDER BY b.bill_cycle_date ASC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        result = dict(row)
+        # Parse supply/delivery totals
+        try:
+            supply = json.loads(result.get("supply_charges_json") or "{}")
+            result["supply_total"] = supply.get("total", 0)
+        except:
+            result["supply_total"] = 0
+        try:
+            delivery = json.loads(result.get("delivery_charges_json") or "{}")
+            result["delivery_total"] = delivery.get("total", 0)
+        except:
+            result["delivery_total"] = 0
+        
+        # Clean up
+        del result["supply_charges_json"]
+        del result["delivery_charges_json"]
+        results.append(result)
+    
+    return results
+
+
+def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
+    """Get the most recent bill with its parsed details (for sensors)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 
+            b.*,
+            bd.due_date,
+            bd.kwh_used,
+            bd.kwh_cost,
+            bd.electricity_total,
+            bd.total_from_billing_period,
+            bd.billing_days,
+            bd.supply_charges_json,
+            bd.delivery_charges_json
+        FROM bills b
+        LEFT JOIN bill_details bd ON b.id = bd.bill_id
+        ORDER BY b.bill_cycle_date DESC
+        LIMIT 1
+    ''')
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    result = dict(row)
+    try:
+        result["supply_charges"] = json.loads(result.get("supply_charges_json") or "{}")
+    except:
+        result["supply_charges"] = {}
+    try:
+        result["delivery_charges"] = json.loads(result.get("delivery_charges_json") or "{}")
+    except:
+        result["delivery_charges"] = {}
+    
+    return result
+
+
+def delete_bill_details(bill_id: int) -> bool:
+    """Remove bill details record"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM bill_details WHERE bill_id = ?', (bill_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
 def migrate_legacy_pdf() -> bool:
     """Migrate legacy latest_bill.pdf to bill_documents. Returns True if migrated."""
     legacy_pdf = DATA_DIR / "latest_bill.pdf"
@@ -490,52 +733,31 @@ def get_all_payments(limit: int = 100, bill_id: Optional[int] = None) -> List[Di
 
 def get_latest_payment() -> Optional[Dict[str, Any]]:
     """
-    Get the most recent payment from the most recent billing cycle.
-    Respects manual_order if set, otherwise uses payment_date + first_scraped_at.
+    Get the most recent payment across ALL billing cycles.
+    Returns the payment with the most recent payment_date (and first_scraped_at as tiebreaker).
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Get all bills to find the most recent one
-    cursor.execute('SELECT * FROM bills')
-    bills = [dict(row) for row in cursor.fetchall()]
-    
-    if not bills:
-        # No bills, fall back to any payment
-        conn.close()
-        payments = get_all_payments(limit=1)
-        return payments[0] if payments else None
-    
-    # Sort bills by date (most recent first)
-    bills = sort_bills_by_date(bills, desc=True)
-    most_recent_bill = bills[0]
-    bill_id = most_recent_bill['id']
-    
-    # Get the "first" payment for this bill
-    # New unlocked payments first, then locked payments in their manual order
+
+    # Get the most recent payment across all bills, ordered by payment_date descending
     cursor.execute('''
         SELECT p.*, u.name as payee_name, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
         FROM payments p
         LEFT JOIN payee_users u ON p.payee_user_id = u.id
         LEFT JOIN bills b ON p.bill_id = b.id
-        WHERE p.bill_id = ?
-        ORDER BY 
-            CASE WHEN p.manual_order IS NOT NULL THEN 1 ELSE 0 END,
+        ORDER BY
             p.payment_date DESC,
-            p.first_scraped_at DESC,
-            p.manual_order ASC
+            p.first_scraped_at DESC
         LIMIT 1
-    ''', (bill_id,))
-    
+    ''')
+
     row = cursor.fetchone()
     conn.close()
-    
+
     if row:
         return dict(row)
-    
-    # No payments for this bill, try to get any payment
-    payments = get_all_payments(limit=1)
-    return payments[0] if payments else None
+
+    return None
 
 def get_payments_for_bill(bill_id: int) -> List[Dict[str, Any]]:
     """Get all payments for a specific bill"""
@@ -897,6 +1119,29 @@ def get_default_payee() -> Optional[Dict[str, Any]]:
     
     return dict(row) if row else None
 
+def get_admin_users() -> List[Dict[str, Any]]:
+    """Get all admin users"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM payee_users WHERE is_admin = 1')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def set_user_admin(user_id: int, is_admin: bool) -> bool:
+    """Set admin status for a user"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('UPDATE payee_users SET is_admin = ? WHERE id = ?', (1 if is_admin else 0, user_id))
+    updated = cursor.rowcount > 0
+    
+    conn.commit()
+    conn.close()
+    return updated
+
 def delete_payee_user(user_id: int) -> bool:
     """Delete a payee user"""
     conn = get_connection()
@@ -909,7 +1154,7 @@ def delete_payee_user(user_id: int) -> bool:
     conn.close()
     return deleted
 
-def update_payee_user(user_id: int, name: Optional[str] = None, is_default: Optional[bool] = None) -> bool:
+def update_payee_user(user_id: int, name: Optional[str] = None, is_default: Optional[bool] = None, is_admin: Optional[bool] = None) -> bool:
     """Update a payee user"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -926,6 +1171,9 @@ def update_payee_user(user_id: int, name: Optional[str] = None, is_default: Opti
     if is_default is not None:
         updates.append('is_default = ?')
         params.append(1 if is_default else 0)
+    if is_admin is not None:
+        updates.append('is_admin = ?')
+        params.append(1 if is_admin else 0)
     
     if updates:
         params.append(user_id)
