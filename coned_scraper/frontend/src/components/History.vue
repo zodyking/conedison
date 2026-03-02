@@ -133,7 +133,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getApiBase } from '../lib/api'
+import { getApiBase } from '../lib/api-base'
 import {
   Chart,
   CategoryScale,
