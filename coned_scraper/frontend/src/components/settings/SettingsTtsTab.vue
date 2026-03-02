@@ -86,6 +86,17 @@
               <span class="tts-toggle-label">Wait for media player idle</span>
             </div>
 
+            <div class="tts-form-group">
+              <label class="tts-label">Message Prefix</label>
+              <input
+                v-model="config.prefix"
+                type="text"
+                class="tts-input"
+                placeholder="Message from Con Edison."
+              />
+              <p class="tts-hint">Spoken at the start of all TTS messages</p>
+            </div>
+
             <!-- Message Templates -->
             <div class="tts-subsection">
               <h4 class="tts-subsection-title">Message Templates</h4>
@@ -252,15 +263,15 @@
               <p class="tts-hint">Build your bill summary message. Click variables to insert.</p>
 
               <div class="tts-var-chips">
+                <span class="tts-var-chip tts-var-chip-prefix" @click="insertScheduleVar('{prefix}')">{prefix}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{greeting}')">{greeting}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{time}')">{time}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{balance}')">{balance}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{latest_bill_amount}')">{latest_bill_amount}</span>
-                <span class="tts-var-chip" @click="insertScheduleVar('{latest_bill_period}')">{latest_bill_period}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{due_date}')">{due_date}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{last_bill_kwh}')">{last_bill_kwh}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{last_payment_amount}')">{last_payment_amount}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{last_payment_date}')">{last_payment_date}</span>
-                <span class="tts-var-chip" @click="insertScheduleVar('{last_bill_kwh}')">{last_bill_kwh}</span>
                 <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{current_usage_kwh}')">{current_usage_kwh}</span>
                 <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{current_usage_cost}')">{current_usage_cost}</span>
                 <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{projected_usage_kwh}')">{projected_usage_kwh}</span>
@@ -339,6 +350,7 @@ const config = reactive({
   volume: 0.7,
   tts_service: '',
   wait_for_idle: true,
+  prefix: 'Message from Con Edison.',
   messages: {
     new_bill: 'Your new Con Edison bill for {month_range} is now available. The total is {amount}.',
     payment_received: 'Good news! Your payment of {amount} has been received. Your account balance is now {balance}.',
@@ -352,7 +364,7 @@ const schedule = reactive({
   start_time: '08:00',
   end_time: '21:00',
   days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
-  message_template: '{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
+  message_template: '{prefix} {greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
   current_usage_sensor: '',
   future_usage_sensor: ''
 })
@@ -428,15 +440,15 @@ async function generatePreview() {
     if (res.ok) {
       const data = await res.json()
       let msg = schedule.message_template || ''
+      msg = msg.replace(/{prefix}/g, config.prefix || 'Message from Con Edison.')
       msg = msg.replace(/{greeting}/g, data.greeting || 'Good morning')
       msg = msg.replace(/{time}/g, data.time || '')
       msg = msg.replace(/{balance}/g, data.balance ?? 'N/A')
       msg = msg.replace(/{latest_bill_amount}/g, data.latest_bill?.amount || 'N/A')
-      msg = msg.replace(/{latest_bill_period}/g, data.latest_bill?.month_range || 'N/A')
       msg = msg.replace(/{due_date}/g, data.latest_bill?.due_date || 'N/A')
+      msg = msg.replace(/{last_bill_kwh}/g, data.latest_bill?.kwh_used || 'N/A')
       msg = msg.replace(/{last_payment_amount}/g, data.latest_payment?.amount || 'No payment')
       msg = msg.replace(/{last_payment_date}/g, data.latest_payment?.payment_date || '')
-      msg = msg.replace(/{last_bill_kwh}/g, data.latest_bill?.kwh_used || 'N/A')
       msg = msg.replace(/{current_usage_kwh}/g, data.current_usage?.kwh || 'N/A')
       msg = msg.replace(/{current_usage_cost}/g, data.current_usage?.cost || 'N/A')
       msg = msg.replace(/{projected_usage_kwh}/g, data.projected_usage?.kwh || 'N/A')
@@ -472,6 +484,7 @@ async function loadConfig() {
       config.volume = typeof data.volume === 'number' ? data.volume : 0.7
       config.tts_service = data.tts_service ?? ''
       config.wait_for_idle = data.wait_for_idle ?? true
+      config.prefix = data.prefix ?? 'Message from Con Edison.'
       if (data.messages && typeof data.messages === 'object') {
         config.messages = { ...config.messages, ...data.messages }
       }
@@ -514,6 +527,7 @@ async function saveConfig() {
         volume: config.volume,
         tts_service: config.tts_service || '',
         wait_for_idle: config.wait_for_idle,
+        prefix: config.prefix || 'Message from Con Edison.',
         messages: config.messages
       })
     })
@@ -937,6 +951,17 @@ onMounted(async () => {
   border-color: #64b5f6;
 }
 
+.tts-var-chip-prefix {
+  background: #fce4ec;
+  border-color: #f48fb1;
+  color: #c2185b;
+}
+
+.tts-var-chip-prefix:hover {
+  background: #f8bbd9;
+  border-color: #f06292;
+}
+
 .tts-var-chip-usage {
   background: #e8f5e9;
   border-color: #81c784;
@@ -950,17 +975,21 @@ onMounted(async () => {
 
 .tts-preview-section {
   margin-top: 0.75rem;
+  width: 100%;
 }
 
 .tts-preview-box {
   margin-top: 0.5rem;
-  padding: 0.75rem 1rem;
+  padding: 1rem;
   background: #fff8e1;
   border: 1px solid #ffe082;
   border-radius: 8px;
   font-size: 0.9rem;
   color: #5d4037;
-  line-height: 1.5;
+  line-height: 1.6;
+  width: 100%;
+  box-sizing: border-box;
+  word-wrap: break-word;
 }
 
 .tts-preview-label {

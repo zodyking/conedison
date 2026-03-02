@@ -1688,11 +1688,16 @@ def get_ledger_data() -> Dict[str, Any]:
     ''')
     orphan_payments = [dict(row) for row in cursor.fetchall()]
     
-    # Get latest payment overall
-    latest_payment = get_latest_payment()
-    
     # Get latest bill
     latest_bill = bills[0] if bills else None
+    
+    # Get latest payment from the most recent billing cycle
+    # If no payment in most recent cycle, show "No payments"
+    latest_payment = None
+    if latest_bill and latest_bill.get('payments'):
+        payments = latest_bill.get('payments', [])
+        if payments and len(payments) > 0:
+            latest_payment = payments[0]  # Already sorted by payment_date DESC
     
     conn.close()
     

@@ -2379,30 +2379,29 @@ async def preview_tts_message():
     if isinstance(balance, (int, float)):
         balance = f"${balance:.2f}"
     
-    # Get latest bill with details (includes due_date, kwh_used, kwh_cost from bill_details)
-    latest_bill_details = get_latest_bill_with_details()
-    
-    # Get latest bill from ledger for month_range and amount
+    # Get latest bill from ledger (this matches Account Ledger display)
     bills = ledger.get("bills", [])
     latest_bill = bills[0] if bills else {}
     
-    # Merge data
-    bill_amount = latest_bill.get("amount", "") or latest_bill.get("bill_total", "")
-    bill_period = latest_bill.get("month_range", "")
-    due_date = ""
+    # Get due_date from bill (now included via get_ledger_data)
+    due_date = latest_bill.get("due_date", "") or ""
+    
+    # Bill amount and period from ledger
+    bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
+    
+    # Get kwh_used and kwh_cost from bill_details for the latest bill
     last_bill_kwh = ""
     kwh_cost = None
+    latest_bill_details = get_latest_bill_with_details()
     
     if latest_bill_details:
-        due_date = latest_bill_details.get("due_date", "") or ""
         kwh_val = latest_bill_details.get("kwh_used")
         if kwh_val:
             last_bill_kwh = f"{kwh_val} kWh"
         kwh_cost = latest_bill_details.get("kwh_cost")
-        if not bill_amount:
-            bill_amount = latest_bill_details.get("amount", "")
-        if not bill_period:
-            bill_period = latest_bill_details.get("month_range", "")
+        # Use due_date from bill_details if not already set
+        if not due_date:
+            due_date = latest_bill_details.get("due_date", "") or ""
     
     # Fetch current and future usage from HA sensors
     current_usage_kwh = ""
@@ -2410,21 +2409,26 @@ async def preview_tts_message():
     projected_usage_kwh = ""
     projected_usage_cost = ""
     
+    add_log("debug", f"TTS Preview: current_usage_sensor={current_usage_sensor}, future_usage_sensor={future_usage_sensor}")
+    
     token = os.environ.get("SUPERVISOR_TOKEN")
-    if token:
+    if token and (current_usage_sensor or future_usage_sensor):
         try:
             async with aiohttp.ClientSession() as session:
                 # Fetch current usage sensor
                 if current_usage_sensor and current_usage_sensor.strip():
+                    sensor_id = current_usage_sensor.strip()
                     try:
                         async with session.get(
-                            f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
+                            f"http://supervisor/core/api/states/{sensor_id}",
                             headers={"Authorization": f"Bearer {token}"},
                         ) as resp:
+                            add_log("debug", f"Current usage sensor {sensor_id}: status={resp.status}")
                             if resp.status == 200:
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
                                 unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                                add_log("debug", f"Current usage state={sensor_state}, unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
@@ -2434,20 +2438,25 @@ async def preview_tts_message():
                                             current_usage_cost = f"${cost_value:.2f}"
                                     except ValueError:
                                         current_usage_kwh = f"{sensor_state} {unit}"
+                            else:
+                                add_log("warning", f"Current usage sensor returned status {resp.status}")
                     except Exception as e:
                         add_log("warning", f"Failed to fetch current usage sensor: {e}")
                 
                 # Fetch future usage projection sensor
                 if future_usage_sensor and future_usage_sensor.strip():
+                    sensor_id = future_usage_sensor.strip()
                     try:
                         async with session.get(
-                            f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
+                            f"http://supervisor/core/api/states/{sensor_id}",
                             headers={"Authorization": f"Bearer {token}"},
                         ) as resp:
+                            add_log("debug", f"Future usage sensor {sensor_id}: status={resp.status}")
                             if resp.status == 200:
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
                                 unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                                add_log("debug", f"Future usage state={sensor_state}, unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
@@ -2457,6 +2466,8 @@ async def preview_tts_message():
                                             projected_usage_cost = f"${cost_value:.2f}"
                                     except ValueError:
                                         projected_usage_kwh = f"{sensor_state} {unit}"
+                            else:
+                                add_log("warning", f"Future usage sensor returned status {resp.status}")
                     except Exception as e:
                         add_log("warning", f"Failed to fetch future usage sensor: {e}")
         except Exception as e:

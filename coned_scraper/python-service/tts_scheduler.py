@@ -37,7 +37,7 @@ class TTSScheduler:
             "start_time": "08:00",  # Active hours start
             "end_time": "21:00",  # Active hours end
             "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
-            "message_template": "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
+            "message_template": "{prefix} {greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
             "current_usage_sensor": "",  # HA sensor entity for current kWh usage
             "future_usage_sensor": "",  # HA sensor entity for projected kWh usage
             "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}
@@ -211,12 +211,14 @@ class TTSScheduler:
             import os
             
             schedule_config = self.load_schedule_config()
+            tts_config = self.load_tts_config()
             template = schedule_config.get("message_template", "")
             current_usage_sensor = schedule_config.get("current_usage_sensor", "")
             future_usage_sensor = schedule_config.get("future_usage_sensor", "")
+            prefix = tts_config.get("prefix", "Message from Con Edison.")
             
             if not template:
-                template = "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}."
+                template = "{prefix} {greeting}. It is currently {time}. Your Con Edison account balance is {balance}."
             
             ledger = get_ledger_data()
             bill_details = get_latest_bill_with_details()
@@ -248,28 +250,27 @@ class TTSScheduler:
             if isinstance(balance, (int, float)):
                 balance = f"${balance:.2f}"
             
-            # Get latest bill data from ledger
+            # Get latest bill data from ledger (matches Account Ledger display)
             bills = ledger.get("bills", [])
             latest_bill = bills[0] if bills else {}
             
-            bill_amount = latest_bill.get("amount", "") or latest_bill.get("bill_total", "")
-            bill_period = latest_bill.get("month_range", "")
+            bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
             
-            # Get due_date, kwh, and kwh_cost from bill_details table
-            due_date = ""
+            # Get due_date from ledger (now included via get_ledger_data)
+            due_date = latest_bill.get("due_date", "") or ""
+            
+            # Get kwh_used and kwh_cost from bill_details table
             last_bill_kwh = ""
             kwh_cost = None
             
             if bill_details:
-                due_date = bill_details.get("due_date", "") or ""
                 kwh_val = bill_details.get("kwh_used")
                 if kwh_val:
                     last_bill_kwh = f"{kwh_val} kWh"
                 kwh_cost = bill_details.get("kwh_cost")
-                if not bill_amount:
-                    bill_amount = bill_details.get("amount", "")
-                if not bill_period:
-                    bill_period = bill_details.get("month_range", "")
+                # Use due_date from bill_details if not already set
+                if not due_date:
+                    due_date = bill_details.get("due_date", "") or ""
             
             # Fetch current and future usage from HA sensors
             current_usage_kwh = ""
@@ -337,11 +338,11 @@ class TTSScheduler:
             
             # Build placeholder values
             placeholders = {
+                "prefix": prefix,
                 "greeting": greeting,
                 "time": time_str,
                 "balance": balance or "N/A",
                 "latest_bill_amount": bill_amount or "N/A",
-                "latest_bill_period": bill_period or "N/A",
                 "due_date": due_date or "N/A",
                 "last_payment_amount": last_payment_amount or "No payment",
                 "last_payment_date": last_payment_date or "N/A",
