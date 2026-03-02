@@ -52,19 +52,8 @@
         </div>
       </div>
 
-      <!-- kWh Usage Chart -->
-      <div class="ha-chart-card">
-        <div class="ha-chart-header">
-          <span class="ha-chart-icon">⚡</span>
-          <span>kWh Usage Over Time</span>
-        </div>
-        <div class="ha-chart-container">
-          <canvas ref="kwhChart"></canvas>
-        </div>
-      </div>
-
-      <!-- Bill Total Chart -->
-      <div class="ha-chart-card">
+      <!-- Bill Total Chart (Primary - Always Visible) -->
+      <div class="ha-chart-card ha-chart-primary">
         <div class="ha-chart-header">
           <span class="ha-chart-icon">💰</span>
           <span>Bill Totals Over Time</span>
@@ -74,25 +63,50 @@
         </div>
       </div>
 
-      <!-- kWh Cost Chart -->
-      <div class="ha-chart-card">
-        <div class="ha-chart-header">
-          <span class="ha-chart-icon">📊</span>
-          <span>Cost per kWh Over Time</span>
+      <!-- Tabbed Charts Section -->
+      <div class="ha-chart-card ha-chart-tabs-card">
+        <div class="ha-chart-tabs">
+          <button 
+            class="ha-chart-tab" 
+            :class="{ active: activeChartTab === 'kwh' }"
+            @click="activeChartTab = 'kwh'"
+          >
+            <span class="ha-tab-icon">⚡</span>
+            <span class="ha-tab-label">kWh Usage</span>
+          </button>
+          <button 
+            class="ha-chart-tab" 
+            :class="{ active: activeChartTab === 'cost' }"
+            @click="activeChartTab = 'cost'"
+          >
+            <span class="ha-tab-icon">📊</span>
+            <span class="ha-tab-label">Cost per kWh</span>
+          </button>
+          <button 
+            class="ha-chart-tab" 
+            :class="{ active: activeChartTab === 'rates' }"
+            @click="activeChartTab = 'rates'"
+          >
+            <span class="ha-tab-icon">🔌</span>
+            <span class="ha-tab-label">Supply vs Delivery</span>
+          </button>
         </div>
-        <div class="ha-chart-container">
-          <canvas ref="kwhCostChart"></canvas>
-        </div>
-      </div>
-
-      <!-- Supply vs Delivery Rates ($/kWh) -->
-      <div class="ha-chart-card">
-        <div class="ha-chart-header">
-          <span class="ha-chart-icon">🔌</span>
-          <span>Supply vs Delivery Rates ($/kWh)</span>
-        </div>
-        <div class="ha-chart-container">
-          <canvas ref="supplyDeliveryChart"></canvas>
+        
+        <div class="ha-chart-tab-content">
+          <!-- kWh Usage Chart -->
+          <div v-show="activeChartTab === 'kwh'" class="ha-chart-container">
+            <canvas ref="kwhChart"></canvas>
+          </div>
+          
+          <!-- kWh Cost Chart -->
+          <div v-show="activeChartTab === 'cost'" class="ha-chart-container">
+            <canvas ref="kwhCostChart"></canvas>
+          </div>
+          
+          <!-- Supply vs Delivery Rates -->
+          <div v-show="activeChartTab === 'rates'" class="ha-chart-container">
+            <canvas ref="supplyDeliveryChart"></canvas>
+          </div>
         </div>
       </div>
 
@@ -190,6 +204,7 @@ interface HistoryRow {
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const historyData = ref<HistoryRow[]>([])
+const activeChartTab = ref<'kwh' | 'cost' | 'rates'>('kwh')
 
 const kwhChart = ref<HTMLCanvasElement | null>(null)
 const billChart = ref<HTMLCanvasElement | null>(null)
@@ -652,6 +667,73 @@ onUnmounted(() => {
   height: 280px;
 }
 
+/* Primary chart (Bill Totals) */
+.ha-chart-primary {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.ha-chart-primary .ha-chart-header {
+  background: linear-gradient(135deg, #0088cc 0%, #005fa3 100%);
+  color: #fff;
+  border-bottom: none;
+}
+
+/* Tabbed charts section */
+.ha-chart-tabs-card {
+  overflow: visible;
+}
+
+.ha-chart-tabs {
+  display: flex;
+  background: var(--ha-card-header-bg, #f8f9fa);
+  border-bottom: 1px solid var(--ha-border-color, #e0e0e0);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ha-chart-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ha-secondary-text-color, #666);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.ha-chart-tab:hover {
+  background: rgba(0, 136, 204, 0.05);
+  color: var(--ha-primary-text-color, #333);
+}
+
+.ha-chart-tab.active {
+  color: var(--ha-primary-color, #0088cc);
+  border-bottom-color: var(--ha-primary-color, #0088cc);
+  background: rgba(0, 136, 204, 0.08);
+}
+
+.ha-tab-icon {
+  font-size: 14px;
+}
+
+.ha-tab-label {
+  font-weight: 600;
+}
+
+.ha-chart-tab-content {
+  min-height: 280px;
+}
+
+.ha-chart-tab-content .ha-chart-container {
+  height: 280px;
+}
+
 .ha-table-container {
   overflow-x: auto;
 }
@@ -705,6 +787,21 @@ onUnmounted(() => {
   }
   
   .ha-chart-container {
+    height: 220px;
+  }
+  
+  .ha-chart-tab {
+    padding: 12px 14px;
+    font-size: 12px;
+  }
+  
+  .ha-tab-icon {
+    font-size: 12px;
+  }
+  
+  .ha-chart-tab-content,
+  .ha-chart-tab-content .ha-chart-container {
+    min-height: 220px;
     height: 220px;
   }
   
