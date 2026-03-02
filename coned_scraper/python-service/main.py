@@ -1257,10 +1257,11 @@ async def download_bill_pdf(request: PdfDownloadRequest):
 
 async def _publish_bill_details_sensors():
     """Publish due_date, kwh_cost, kwh_used sensors via MQTT"""
-    global mqtt_client
-    if mqtt_client and mqtt_client.enabled:
+    from mqtt_client import get_mqtt_client
+    client = get_mqtt_client()
+    if client and client.enabled:
         try:
-            await mqtt_client.publish_bill_details_sensors()
+            await client.publish_bill_details_sensors()
         except Exception as e:
             add_log("warning", f"Failed to publish bill details sensors: {e}")
 
@@ -2229,7 +2230,8 @@ class TTSScheduleModel(BaseModel):
     end_time: Optional[str] = None  # Active hours end "HH:MM"
     days_of_week: Optional[list] = None  # ["mon", "tue", ...]
     message_template: Optional[str] = None  # Custom message template with placeholders
-    kwh_sensor: Optional[str] = None  # HA sensor entity for kWh usage
+    current_usage_sensor: Optional[str] = None  # HA sensor entity for current kWh usage
+    future_usage_sensor: Optional[str] = None  # HA sensor entity for projected kWh usage
     schedule_times: Optional[list] = None  # Legacy: List of TTSScheduleTimeModel dicts
     schedule_type: Optional[str] = None  # Legacy: "daily" or "specific_days"
 
@@ -2343,10 +2345,11 @@ async def preview_tts_message():
     
     ledger = get_ledger_data()
     
-    # Get schedule config for kwh_sensor
+    # Get schedule config for sensors
     scheduler = get_scheduler()
     schedule_config = scheduler.load_schedule_config()
-    kwh_sensor = schedule_config.get("kwh_sensor", "")
+    current_usage_sensor = schedule_config.get("current_usage_sensor", "")
+    future_usage_sensor = schedule_config.get("future_usage_sensor", "")
     
     # Get time info
     now = datetime.now()
@@ -2376,7 +2379,7 @@ async def preview_tts_message():
     if isinstance(balance, (int, float)):
         balance = f"${balance:.2f}"
     
-    # Get latest bill with details (includes due_date, kwh_used from bill_details)
+    # Get latest bill with details (includes due_date, kwh_used, kwh_cost from bill_details)
     latest_bill_details = get_latest_bill_with_details()
     
     # Get latest bill from ledger for month_range and amount
@@ -2387,36 +2390,77 @@ async def preview_tts_message():
     bill_amount = latest_bill.get("amount", "") or latest_bill.get("bill_total", "")
     bill_period = latest_bill.get("month_range", "")
     due_date = ""
-    kwh_used = ""
+    last_bill_kwh = ""
+    kwh_cost = None
     
     if latest_bill_details:
         due_date = latest_bill_details.get("due_date", "") or ""
         kwh_val = latest_bill_details.get("kwh_used")
         if kwh_val:
-            kwh_used = f"{kwh_val} kWh"
+            last_bill_kwh = f"{kwh_val} kWh"
+        kwh_cost = latest_bill_details.get("kwh_cost")
         if not bill_amount:
             bill_amount = latest_bill_details.get("amount", "")
         if not bill_period:
             bill_period = latest_bill_details.get("month_range", "")
     
-    # If kwh_sensor is configured, try to fetch from Home Assistant
-    if kwh_sensor and kwh_sensor.strip():
-        token = os.environ.get("SUPERVISOR_TOKEN")
-        if token:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"http://supervisor/core/api/states/{kwh_sensor.strip()}",
-                        headers={"Authorization": f"Bearer {token}"},
-                    ) as resp:
-                        if resp.status == 200:
-                            state_data = await resp.json()
-                            sensor_state = state_data.get("state", "")
-                            unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                            if sensor_state and sensor_state not in ("unknown", "unavailable"):
-                                kwh_used = f"{sensor_state} {unit}"
-            except Exception as e:
-                add_log("warning", f"Failed to fetch kWh sensor for preview: {e}")
+    # Fetch current and future usage from HA sensors
+    current_usage_kwh = ""
+    current_usage_cost = ""
+    projected_usage_kwh = ""
+    projected_usage_cost = ""
+    
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if token:
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Fetch current usage sensor
+                if current_usage_sensor and current_usage_sensor.strip():
+                    try:
+                        async with session.get(
+                            f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        ) as resp:
+                            if resp.status == 200:
+                                state_data = await resp.json()
+                                sensor_state = state_data.get("state", "")
+                                unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                                if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                    try:
+                                        kwh_value = float(sensor_state)
+                                        current_usage_kwh = f"{kwh_value:.1f} {unit}"
+                                        if kwh_cost:
+                                            cost_value = kwh_value * kwh_cost
+                                            current_usage_cost = f"${cost_value:.2f}"
+                                    except ValueError:
+                                        current_usage_kwh = f"{sensor_state} {unit}"
+                    except Exception as e:
+                        add_log("warning", f"Failed to fetch current usage sensor: {e}")
+                
+                # Fetch future usage projection sensor
+                if future_usage_sensor and future_usage_sensor.strip():
+                    try:
+                        async with session.get(
+                            f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        ) as resp:
+                            if resp.status == 200:
+                                state_data = await resp.json()
+                                sensor_state = state_data.get("state", "")
+                                unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                                if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                    try:
+                                        kwh_value = float(sensor_state)
+                                        projected_usage_kwh = f"{kwh_value:.1f} {unit}"
+                                        if kwh_cost:
+                                            cost_value = kwh_value * kwh_cost
+                                            projected_usage_cost = f"${cost_value:.2f}"
+                                    except ValueError:
+                                        projected_usage_kwh = f"{sensor_state} {unit}"
+                    except Exception as e:
+                        add_log("warning", f"Failed to fetch future usage sensor: {e}")
+        except Exception as e:
+            add_log("warning", f"Failed to create session for sensor fetch: {e}")
     
     # Get latest payment from ledger
     latest_payment = ledger.get("latest_payment")
@@ -2435,11 +2479,19 @@ async def preview_tts_message():
             "amount": bill_amount or "N/A",
             "month_range": bill_period or "N/A",
             "due_date": due_date or "N/A",
-            "kwh_used": kwh_used or "N/A"
+            "kwh_used": last_bill_kwh or "N/A"
         },
         "latest_payment": {
             "amount": last_payment_amount or "No payment",
             "payment_date": last_payment_date or ""
+        },
+        "current_usage": {
+            "kwh": current_usage_kwh or "N/A",
+            "cost": current_usage_cost or "N/A"
+        },
+        "projected_usage": {
+            "kwh": projected_usage_kwh or "N/A",
+            "cost": projected_usage_cost or "N/A"
         }
     }
 

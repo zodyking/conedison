@@ -218,16 +218,32 @@
               </div>
             </div>
 
-            <!-- kWh Sensor Input -->
-            <div class="tts-form-group">
-              <label class="tts-label">kWh Sensor (Home Assistant Entity ID)</label>
-              <input
-                v-model="schedule.kwh_sensor"
-                type="text"
-                class="tts-input"
-                placeholder="sensor.conedison_kwh_used"
-              />
-              <p class="tts-hint">Optional: Enter a HA sensor entity to get real-time kWh data. Leave empty to use parsed bill data.</p>
+            <!-- Usage Sensors -->
+            <div class="tts-subsection">
+              <h4 class="tts-subsection-title">Usage Projection Sensors</h4>
+              <p class="tts-hint">Configure Home Assistant sensors for real-time usage projections. The app will multiply these values by the kWh cost sensor (automatically published via MQTT).</p>
+
+              <div class="tts-form-group">
+                <label class="tts-label">Current Usage Sensor (kWh)</label>
+                <input
+                  v-model="schedule.current_usage_sensor"
+                  type="text"
+                  class="tts-input"
+                  placeholder="sensor.electric_meter_kwh"
+                />
+                <p class="tts-hint">Sensor that tracks current month-to-date kWh usage</p>
+              </div>
+
+              <div class="tts-form-group">
+                <label class="tts-label">Future Usage Projection Sensor (kWh)</label>
+                <input
+                  v-model="schedule.future_usage_sensor"
+                  type="text"
+                  class="tts-input"
+                  placeholder="sensor.projected_monthly_kwh"
+                />
+                <p class="tts-hint">Sensor that projects end-of-month kWh usage</p>
+              </div>
             </div>
 
             <!-- Schedule Message Builder -->
@@ -244,7 +260,11 @@
                 <span class="tts-var-chip" @click="insertScheduleVar('{due_date}')">{due_date}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{last_payment_amount}')">{last_payment_amount}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{last_payment_date}')">{last_payment_date}</span>
-                <span class="tts-var-chip" @click="insertScheduleVar('{kwh_used}')">{kwh_used}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{last_bill_kwh}')">{last_bill_kwh}</span>
+                <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{current_usage_kwh}')">{current_usage_kwh}</span>
+                <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{current_usage_cost}')">{current_usage_cost}</span>
+                <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{projected_usage_kwh}')">{projected_usage_kwh}</span>
+                <span class="tts-var-chip tts-var-chip-usage" @click="insertScheduleVar('{projected_usage_cost}')">{projected_usage_cost}</span>
               </div>
 
               <textarea
@@ -332,8 +352,9 @@ const schedule = reactive({
   start_time: '08:00',
   end_time: '21:00',
   days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
-  message_template: '{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount} and is due {due_date}. You used {kwh_used} of electricity this billing cycle. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
-  kwh_sensor: ''
+  message_template: '{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
+  current_usage_sensor: '',
+  future_usage_sensor: ''
 })
 
 const expandedSections = reactive({
@@ -415,7 +436,11 @@ async function generatePreview() {
       msg = msg.replace(/{due_date}/g, data.latest_bill?.due_date || 'N/A')
       msg = msg.replace(/{last_payment_amount}/g, data.latest_payment?.amount || 'No payment')
       msg = msg.replace(/{last_payment_date}/g, data.latest_payment?.payment_date || '')
-      msg = msg.replace(/{kwh_used}/g, data.latest_bill?.kwh_used || 'N/A')
+      msg = msg.replace(/{last_bill_kwh}/g, data.latest_bill?.kwh_used || 'N/A')
+      msg = msg.replace(/{current_usage_kwh}/g, data.current_usage?.kwh || 'N/A')
+      msg = msg.replace(/{current_usage_cost}/g, data.current_usage?.cost || 'N/A')
+      msg = msg.replace(/{projected_usage_kwh}/g, data.projected_usage?.kwh || 'N/A')
+      msg = msg.replace(/{projected_usage_cost}/g, data.projected_usage?.cost || 'N/A')
       previewMessage.value = msg
     }
   } catch (e) {
@@ -468,7 +493,8 @@ async function loadSchedule() {
       schedule.end_time = data.end_time ?? '21:00'
       schedule.days_of_week = data.days_of_week ?? ['mon', 'tue', 'wed', 'thu', 'fri']
       schedule.message_template = data.message_template ?? schedule.message_template
-      schedule.kwh_sensor = data.kwh_sensor ?? ''
+      schedule.current_usage_sensor = data.current_usage_sensor ?? ''
+      schedule.future_usage_sensor = data.future_usage_sensor ?? ''
     }
   } catch (e) {
     console.error('Failed to load schedule:', e)
@@ -519,7 +545,8 @@ async function saveSchedule() {
         end_time: schedule.end_time,
         days_of_week: schedule.days_of_week,
         message_template: schedule.message_template,
-        kwh_sensor: schedule.kwh_sensor
+        current_usage_sensor: schedule.current_usage_sensor,
+        future_usage_sensor: schedule.future_usage_sensor
       })
     })
     if (res.ok) {
@@ -908,6 +935,17 @@ onMounted(async () => {
 .tts-var-chip:hover {
   background: #bbdefb;
   border-color: #64b5f6;
+}
+
+.tts-var-chip-usage {
+  background: #e8f5e9;
+  border-color: #81c784;
+  color: #2e7d32;
+}
+
+.tts-var-chip-usage:hover {
+  background: #c8e6c9;
+  border-color: #66bb6a;
 }
 
 .tts-preview-section {

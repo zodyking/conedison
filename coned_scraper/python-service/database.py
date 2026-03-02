@@ -1652,19 +1652,24 @@ def get_ledger_data() -> Dict[str, Any]:
     
     # Sort bills by date (newest first)
     bills = sort_bills_by_date(bills, desc=True)
-    
+
     cursor.execute('SELECT bill_id FROM bill_documents')
     bills_with_pdf = {row['bill_id'] for row in cursor.fetchall()}
-    
+
+    # Get due dates from bill_details
+    cursor.execute('SELECT bill_id, due_date FROM bill_details')
+    due_dates_map = {row['bill_id']: row['due_date'] for row in cursor.fetchall()}
+
     for bill in bills:
         bill['pdf_exists'] = bill['id'] in bills_with_pdf
+        bill['due_date'] = due_dates_map.get(bill['id'], None)
         cursor.execute('''
             SELECT p.*, u.name as payee_name FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
             WHERE p.bill_id = ?
-            ORDER BY 
+            ORDER BY
                 CASE WHEN p.manual_order IS NOT NULL THEN 1 ELSE 0 END,
-                p.payment_date DESC, 
+                p.payment_date DESC,
                 p.first_scraped_at DESC,
                 p.manual_order ASC
         ''', (bill['id'],))

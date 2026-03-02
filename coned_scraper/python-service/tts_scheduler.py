@@ -37,8 +37,9 @@ class TTSScheduler:
             "start_time": "08:00",  # Active hours start
             "end_time": "21:00",  # Active hours end
             "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
-            "message_template": "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount} and is due {due_date}. You used {kwh_used} of electricity this billing cycle. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
-            "kwh_sensor": "",  # HA sensor entity for kWh usage
+            "message_template": "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
+            "current_usage_sensor": "",  # HA sensor entity for current kWh usage
+            "future_usage_sensor": "",  # HA sensor entity for projected kWh usage
             "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}
             "schedule_type": "daily",  # Legacy
             "updated_at": None
@@ -211,7 +212,8 @@ class TTSScheduler:
             
             schedule_config = self.load_schedule_config()
             template = schedule_config.get("message_template", "")
-            kwh_sensor = schedule_config.get("kwh_sensor", "")
+            current_usage_sensor = schedule_config.get("current_usage_sensor", "")
+            future_usage_sensor = schedule_config.get("future_usage_sensor", "")
             
             if not template:
                 template = "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}."
@@ -253,28 +255,36 @@ class TTSScheduler:
             bill_amount = latest_bill.get("amount", "") or latest_bill.get("bill_total", "")
             bill_period = latest_bill.get("month_range", "")
             
-            # Get due_date and kwh from bill_details table
+            # Get due_date, kwh, and kwh_cost from bill_details table
             due_date = ""
-            kwh_used = ""
+            last_bill_kwh = ""
+            kwh_cost = None
             
             if bill_details:
                 due_date = bill_details.get("due_date", "") or ""
                 kwh_val = bill_details.get("kwh_used")
                 if kwh_val:
-                    kwh_used = f"{kwh_val} kWh"
+                    last_bill_kwh = f"{kwh_val} kWh"
+                kwh_cost = bill_details.get("kwh_cost")
                 if not bill_amount:
                     bill_amount = bill_details.get("amount", "")
                 if not bill_period:
                     bill_period = bill_details.get("month_range", "")
             
-            # If kwh_sensor is configured, try to fetch from Home Assistant
-            if kwh_sensor and kwh_sensor.strip():
-                token = os.environ.get("SUPERVISOR_TOKEN")
-                if token:
-                    try:
-                        async with aiohttp.ClientSession() as session:
+            # Fetch current and future usage from HA sensors
+            current_usage_kwh = ""
+            current_usage_cost = ""
+            projected_usage_kwh = ""
+            projected_usage_cost = ""
+            
+            token = os.environ.get("SUPERVISOR_TOKEN")
+            if token:
+                async with aiohttp.ClientSession() as session:
+                    # Fetch current usage sensor
+                    if current_usage_sensor and current_usage_sensor.strip():
+                        try:
                             async with session.get(
-                                f"http://supervisor/core/api/states/{kwh_sensor.strip()}",
+                                f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
                                 headers={"Authorization": f"Bearer {token}"},
                             ) as resp:
                                 if resp.status == 200:
@@ -282,9 +292,39 @@ class TTSScheduler:
                                     sensor_state = state_data.get("state", "")
                                     unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
                                     if sensor_state and sensor_state not in ("unknown", "unavailable"):
-                                        kwh_used = f"{sensor_state} {unit}"
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch kWh sensor: {e}")
+                                        try:
+                                            kwh_value = float(sensor_state)
+                                            current_usage_kwh = f"{kwh_value:.1f} {unit}"
+                                            if kwh_cost:
+                                                cost_value = kwh_value * kwh_cost
+                                                current_usage_cost = f"${cost_value:.2f}"
+                                        except ValueError:
+                                            current_usage_kwh = f"{sensor_state} {unit}"
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch current usage sensor: {e}")
+                    
+                    # Fetch future usage projection sensor
+                    if future_usage_sensor and future_usage_sensor.strip():
+                        try:
+                            async with session.get(
+                                f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
+                                headers={"Authorization": f"Bearer {token}"},
+                            ) as resp:
+                                if resp.status == 200:
+                                    state_data = await resp.json()
+                                    sensor_state = state_data.get("state", "")
+                                    unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                                    if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                        try:
+                                            kwh_value = float(sensor_state)
+                                            projected_usage_kwh = f"{kwh_value:.1f} {unit}"
+                                            if kwh_cost:
+                                                cost_value = kwh_value * kwh_cost
+                                                projected_usage_cost = f"${cost_value:.2f}"
+                                        except ValueError:
+                                            projected_usage_kwh = f"{sensor_state} {unit}"
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch future usage sensor: {e}")
             
             # Get latest payment from ledger
             latest_payment = ledger.get("latest_payment")
@@ -305,7 +345,11 @@ class TTSScheduler:
                 "due_date": due_date or "N/A",
                 "last_payment_amount": last_payment_amount or "No payment",
                 "last_payment_date": last_payment_date or "N/A",
-                "kwh_used": kwh_used or "N/A",
+                "last_bill_kwh": last_bill_kwh or "N/A",
+                "current_usage_kwh": current_usage_kwh or "N/A",
+                "current_usage_cost": current_usage_cost or "N/A",
+                "projected_usage_kwh": projected_usage_kwh or "N/A",
+                "projected_usage_cost": projected_usage_cost or "N/A",
             }
             
             # Replace placeholders in template

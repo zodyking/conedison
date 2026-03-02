@@ -101,8 +101,13 @@
           <template v-if="ledgerData.bills.length > 0">
             <div v-for="bill in ledgerData.bills" :key="bill.id" class="ha-bill-card">
               <div class="ha-bill-header">
-                Bill Cycle: {{ bill.bill_cycle_date }}
-                {{ bill.month_range ? ` (${bill.month_range})` : '' }}
+                <span>
+                  Bill Cycle: {{ bill.bill_cycle_date }}
+                  {{ bill.month_range ? ` (${bill.month_range})` : '' }}
+                </span>
+                <span v-if="bill.due_date" class="ha-bill-due">
+                  Due: {{ bill.due_date }}
+                </span>
               </div>
               <div class="ha-bill-entry">
                 <div class="ha-bill-content">

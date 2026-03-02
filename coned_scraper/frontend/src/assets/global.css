@@ -454,6 +454,20 @@ body {
   font-weight: 600;
   font-size: 0.75rem;
   color: #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ha-bill-due {
+  background: #fff3e0;
+  color: #e65100;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
 }
 
 .ha-bill-entry {
