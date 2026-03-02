@@ -108,14 +108,14 @@
         <p class="ha-message-desc">
           Use <code v-pre>{placeholder}</code> for variables (e.g. <code v-pre>{amount}</code>, <code v-pre>{balance}</code>, <code v-pre>{month_range}</code>).
         </p>
-        <div v-for="(msg, key) in messageEntries" :key="key" class="ha-form-group">
-          <label :for="`msg-${key}`" class="ha-form-label">{{ formatLabel(key) }}</label>
+        <div v-for="msgKey in messageEntries" :key="msgKey" class="ha-form-group">
+          <label :for="`msg-${msgKey}`" class="ha-form-label">{{ formatLabel(msgKey) }}</label>
           <input
-            :id="`msg-${key}`"
-            v-model="messages[key]"
+            :id="`msg-${msgKey}`"
+            v-model="messages[msgKey]"
             type="text"
             class="ha-form-input"
-            :placeholder="placeholders[key]"
+            :placeholder="placeholders[msgKey]"
           />
         </div>
         <button type="button" class="ha-button ha-button-primary" :disabled="isLoading" @click="handleSave">
