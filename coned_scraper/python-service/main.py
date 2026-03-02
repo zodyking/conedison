@@ -27,7 +27,7 @@ from database import (
     get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, 
     add_scrape_history, get_scrape_history,
     # New normalized data functions
-    get_ledger_data, get_all_bills, get_bill_by_id, get_all_payments, get_latest_payment,
+    get_ledger_data, get_all_bills, get_bill_by_id, get_all_payments,
     get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
     add_user_card, delete_user_card, get_user_cards, update_user_card, get_user_by_card,
     attribute_payment, get_unverified_payments, clear_payment_attribution,
@@ -548,6 +548,8 @@ def should_publish_last_payment() -> tuple:
     Check if we should publish last_payment to MQTT.
     Returns (should_publish: bool, last_payment_data: dict or None, reason: str)
     
+    Last payment is ALWAYS from the most recent billing cycle only.
+    
     Only publish when:
     1. Payment count for most recent bill increased (new payment added)
     2. Manual audit changed WHICH payment is the "last" one (different payment ID)
@@ -558,7 +560,7 @@ def should_publish_last_payment() -> tuple:
     - Just payee attribution changed (payee doesn't affect last_payment MQTT)
     - Order changed but same payment is still "last"
     """
-    from database import get_most_recent_bill_payment_count, get_latest_payment
+    from database import get_most_recent_bill_payment_count
     
     current_state = get_most_recent_bill_payment_count()
     previous_state = load_last_payment_state()
@@ -566,8 +568,9 @@ def should_publish_last_payment() -> tuple:
     current_bill_id = current_state.get("bill_id")
     current_count = current_state.get("payment_count", 0)
     
-    # Use get_latest_payment() to get the actual latest payment across all bills
-    latest_payment = get_latest_payment()
+    # Use last payment from the MOST RECENT billing cycle only (not across all bills)
+    latest_payment = current_state.get("last_payment")
+    bill_cycle_date = current_state.get("bill_cycle_date", "")
     
     previous_bill_id = previous_state.get("bill_id")
     previous_count = previous_state.get("payment_count", 0)
@@ -628,7 +631,12 @@ def should_publish_last_payment() -> tuple:
     }
     save_last_payment_state(new_state)
     
-    return should_publish, latest_payment, reason
+    # Augment payment with bill_cycle_date for MQTT payload
+    payment_to_publish = dict(latest_payment) if latest_payment else None
+    if payment_to_publish and bill_cycle_date:
+        payment_to_publish["bill_cycle_date"] = bill_cycle_date
+    
+    return should_publish, payment_to_publish, reason
 
 
 # ==========================================
@@ -675,6 +683,8 @@ def should_trigger_payment_tts() -> tuple:
     Check if we should trigger TTS for a new payment.
     Independent of MQTT - uses its own state file.
     
+    Payment data is ALWAYS from the most recent billing cycle only.
+    
     Returns (should_trigger: bool, payment_data: dict or None, reason: str)
     
     Triggers when:
@@ -686,7 +696,7 @@ def should_trigger_payment_tts() -> tuple:
     - Bill cycle changes without new payments
     - Reordering existing payments
     """
-    from database import get_most_recent_bill_payment_count, get_latest_payment
+    from database import get_most_recent_bill_payment_count
     
     current_state = get_most_recent_bill_payment_count()
     previous_state = load_tts_payment_state()
@@ -694,8 +704,8 @@ def should_trigger_payment_tts() -> tuple:
     current_bill_id = current_state.get("bill_id")
     current_count = current_state.get("payment_count", 0)
     
-    # Get the latest payment on the most recent bill
-    latest_payment = get_latest_payment()
+    # Get the latest payment from the MOST RECENT billing cycle only
+    latest_payment = current_state.get("last_payment")
     
     previous_bill_id = previous_state.get("bill_id")
     previous_count = previous_state.get("payment_count", 0)
