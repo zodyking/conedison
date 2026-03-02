@@ -100,24 +100,24 @@
         
         <div class="ha-chart-tab-content">
           <!-- Real Time Usage Chart (Last 24 Hours) -->
-          <div v-show="activeChartTab === 'realtime'" class="ha-chart-container ha-chart-container-tall">
-            <div v-if="realtimeLoading" class="ha-realtime-loading">
-              <div class="ha-loading-spinner small"></div>
-              <span>Loading real-time data...</span>
-            </div>
-            <div v-else-if="realtimeError" class="ha-realtime-error">
-              {{ realtimeError }}
-            </div>
-            <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
-              <p>No real-time usage data available.</p>
-              <p class="ha-realtime-hint">Enable Meter Tracking in Settings to view quarter-hour usage data.</p>
-            </div>
-            <template v-if="realtimeData.length && !realtimeLoading">
-              <canvas ref="realtimeChart"></canvas>
-              <div class="ha-realtime-disclaimer">
-                Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
+          <div v-show="activeChartTab === 'realtime'" class="ha-realtime-wrapper">
+            <div class="ha-chart-container ha-chart-container-tall">
+              <div v-if="realtimeLoading" class="ha-realtime-loading">
+                <div class="ha-loading-spinner small"></div>
+                <span>Loading real-time data...</span>
               </div>
-            </template>
+              <div v-else-if="realtimeError" class="ha-realtime-error">
+                {{ realtimeError }}
+              </div>
+              <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
+                <p>No real-time usage data available.</p>
+                <p class="ha-realtime-hint">Enable Meter Tracking in Settings to view quarter-hour usage data.</p>
+              </div>
+              <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
+            </div>
+            <div v-if="realtimeData.length && !realtimeLoading" class="ha-realtime-disclaimer">
+              Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
+            </div>
           </div>
           
           <!-- Bill History Chart -->
@@ -959,8 +959,13 @@ onUnmounted(() => {
   height: 365px;
 }
 
+.ha-realtime-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
 .ha-realtime-disclaimer {
-  margin-top: 12px;
+  margin: 12px 16px 16px;
   padding: 10px 14px;
   background: #fff8e1;
   border: 1px solid #ffcc02;

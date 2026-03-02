@@ -208,18 +208,30 @@ class MeterService:
                 return None
             
             forecast = forecasts[0]
-            return {
+            forecast_data = {
                 'start_date': forecast.start_date.isoformat() if forecast.start_date else None,
                 'end_date': forecast.end_date.isoformat() if forecast.end_date else None,
                 'usage_to_date': forecast.usage_to_date,
                 'forecasted_usage': forecast.forecasted_usage,
                 'cost_to_date': forecast.cost_to_date,
                 'forecasted_cost': forecast.forecasted_cost,
-                'unit': str(forecast.unit_of_measure) if forecast.unit_of_measure else 'KWH'
+                'unit': str(forecast.unit_of_measure) if forecast.unit_of_measure else 'KWH',
+                'fetched_at': datetime.now(timezone.utc).isoformat()
             }
+            
+            # Cache to database
+            from database import save_meter_forecast_db
+            save_meter_forecast_db(forecast_data)
+            
+            return forecast_data
         except Exception as e:
             logger.error(f"Failed to fetch forecast: {e}")
             return None
+    
+    def get_cached_forecast(self) -> Optional[Dict[str, Any]]:
+        """Get the most recent cached forecast."""
+        from database import get_meter_forecast_db
+        return get_meter_forecast_db()
     
     async def fetch_quarter_hour_reads(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Fetch quarter-hour (15-minute) usage data for real-time chart.
@@ -273,6 +285,10 @@ class MeterService:
                 }
                 for r in reads
             ]
+            
+            # Cache to database (limit to last 24 hours worth for storage efficiency)
+            from database import save_realtime_readings_db
+            save_realtime_readings_db(result[-96:] if len(result) > 96 else result)  # 96 = 24 hours of 15-min intervals
             
             logger.info(f"Fetched {len(result)} quarter-hour readings")
             return result

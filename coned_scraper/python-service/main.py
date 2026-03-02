@@ -2477,28 +2477,15 @@ async def test_meter_connection():
 
 @app.get("/api/meter-reading")
 async def get_meter_reading():
-    """Get latest meter reading (cached or fresh) with forecast data"""
+    """Get latest meter reading with forecast data - uses cached data for immediate load"""
     from meter_service import get_meter_service
     from database import get_latest_bill_with_details
     
     service = get_meter_service()
     reading = service.get_cached_reading()
     
-    # Fetch forecast data for usage_to_date
-    forecast = None
-    if service.is_enabled():
-        try:
-            forecast = await service.fetch_forecast()
-        except Exception:
-            forecast = None
-    
-    if not reading:
-        return {
-            "enabled": service.is_enabled(),
-            "reading": None,
-            "cost": None,
-            "forecast": forecast
-        }
+    # Get cached forecast for immediate load (no network call)
+    forecast = service.get_cached_forecast() if service.is_enabled() else None
     
     # Calculate cost using kwh_cost from latest bill
     cost = None
@@ -2506,7 +2493,7 @@ async def get_meter_reading():
     latest_bill = get_latest_bill_with_details()
     kwh_cost = latest_bill.get('kwh_cost') if latest_bill else None
     
-    if kwh_cost and reading.get('value'):
+    if kwh_cost and reading and reading.get('value'):
         cost = reading['value'] * float(kwh_cost)
     
     # Calculate usage_to_date cost from forecast
@@ -2554,21 +2541,35 @@ async def refresh_meter_reading():
 
 
 @app.get("/api/meter-reading/realtime")
-async def get_realtime_usage(hours: int = 24):
+async def get_realtime_usage(hours: int = 24, refresh: bool = False):
     """Get quarter-hour (15-minute) usage data for real-time chart.
     
     Args:
         hours: Number of hours to fetch (default 24, max 144 / 6 days)
+        refresh: If True, fetch fresh data from API. If False, use cached data for immediate load.
     
     Returns:
         List of readings with start_time, end_time, consumption
     """
     from meter_service import get_meter_service
+    from database import get_realtime_readings_db
     
     service = get_meter_service()
     
     if not service.is_enabled():
         raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
+    
+    # For immediate page load, return cached data first
+    if not refresh:
+        cached = get_realtime_readings_db()
+        if cached:
+            return {
+                "success": True,
+                "readings": cached,
+                "hours": 24,
+                "count": len(cached),
+                "cached": True
+            }
     
     # Clamp hours to max 144 (6 days of quarter-hour data)
     hours = min(max(1, hours), 144)
@@ -2587,7 +2588,8 @@ async def get_realtime_usage(hours: int = 24):
         "success": True,
         "readings": readings,
         "hours": hours,
-        "count": len(readings)
+        "count": len(readings),
+        "cached": False
     }
 
 

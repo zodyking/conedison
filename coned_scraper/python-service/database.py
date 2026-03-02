@@ -2039,6 +2039,38 @@ def save_meter_reading_db(reading: Dict[str, Any]):
     set_app_setting('meter_reading', json.dumps(reading))
 
 
+def get_meter_forecast_db() -> Optional[Dict[str, Any]]:
+    """Get cached meter forecast from database"""
+    value = get_app_setting('meter_forecast')
+    if value:
+        try:
+            return json.loads(value)
+        except:
+            pass
+    return None
+
+
+def save_meter_forecast_db(forecast: Dict[str, Any]):
+    """Save meter forecast to database (cache)"""
+    set_app_setting('meter_forecast', json.dumps(forecast))
+
+
+def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
+    """Get cached realtime readings from database"""
+    value = get_app_setting('realtime_readings')
+    if value:
+        try:
+            return json.loads(value)
+        except:
+            pass
+    return None
+
+
+def save_realtime_readings_db(readings: List[Dict[str, Any]]):
+    """Save realtime readings to database (cache)"""
+    set_app_setting('realtime_readings', json.dumps(readings))
+
+
 # Initialize database on import
 init_database()
 migrate_legacy_pdf()  # Migrate legacy latest_bill.pdf to bill_documents

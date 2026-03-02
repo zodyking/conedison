@@ -56,7 +56,7 @@
         <div class="ha-card-content ha-summary-content">
           <div class="ha-summary-row ha-summary-row-two">
             <div class="ha-summary-box ha-balance-box">
-              <div class="ha-summary-label">Current Balance</div>
+              <div class="ha-summary-label">Account Balance</div>
               <div class="ha-summary-value ha-balance-text">{{ ledgerData.account_balance || '—' }}</div>
             </div>
             <div class="ha-summary-box ha-due-box" v-if="latestBillDueDate">
@@ -694,38 +694,38 @@ onUnmounted(() => clearInterval(interval))
   font-size: 1.1rem;
 }
 
-/* Meter Tracking Boxes - Highlight Style (no background, prominent text) */
+/* Meter Tracking Boxes - Blue style matching header */
 .ha-meter-highlight {
   background: transparent;
-  border: 2px solid #2e7d32;
+  border: 2px solid #0088cc;
   border-radius: 8px;
 }
 .ha-meter-highlight .ha-summary-label {
-  color: #2e7d32;
+  color: #0088cc;
   font-weight: 600;
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.5px;
 }
 .ha-meter-highlight-value {
-  color: #1b5e20;
+  color: #005fa3;
   font-weight: 800;
   font-size: 1.4rem;
 }
 .ha-cost-highlight {
   background: transparent;
-  border: 2px solid #7b1fa2;
+  border: 2px solid #0088cc;
   border-radius: 8px;
 }
 .ha-cost-highlight .ha-summary-label {
-  color: #7b1fa2;
+  color: #0088cc;
   font-weight: 600;
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.5px;
 }
 .ha-cost-highlight-value {
-  color: #4a148c;
+  color: #005fa3;
   font-weight: 800;
   font-size: 1.4rem;
 }

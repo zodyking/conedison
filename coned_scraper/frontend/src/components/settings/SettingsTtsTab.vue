@@ -231,8 +231,8 @@
               </div>
             </div>
 
-            <!-- Usage Sensors -->
-            <div class="tts-subsection">
+            <!-- Usage Sensors - Only show when meter tracking is NOT enabled -->
+            <div v-if="!meterTrackingEnabled" class="tts-subsection">
               <h4 class="tts-subsection-title">Usage Projection Sensors</h4>
               <p class="tts-hint">Configure Home Assistant sensors for real-time usage projections. The app will multiply these values by the kWh cost sensor (automatically published via MQTT).</p>
 
@@ -256,6 +256,17 @@
                   placeholder="sensor.projected_monthly_kwh"
                 />
                 <p class="tts-hint">Sensor that projects end-of-month kWh usage</p>
+              </div>
+            </div>
+            
+            <!-- Meter Tracking Active Notice -->
+            <div v-if="meterTrackingEnabled" class="tts-subsection tts-meter-active">
+              <div class="tts-meter-notice">
+                <span class="tts-meter-icon">⚡</span>
+                <div>
+                  <strong>Meter Tracking Active</strong>
+                  <p>Usage data is automatically sourced from your Con Edison meter via the addon's MQTT sensors.</p>
+                </div>
               </div>
             </div>
 
@@ -375,6 +386,7 @@ const expandedSections = reactive({
 const alertMessage = ref<{ type: string; text: string } | null>(null)
 const scheduleMessage = ref<{ type: string; text: string } | null>(null)
 const previewMessage = ref('')
+const meterTrackingEnabled = ref(false)
 
 const dayOptions = [
   { value: 'mon', label: 'Mon' },
@@ -624,8 +636,20 @@ async function testBillSummary() {
   }
 }
 
+async function checkMeterTracking() {
+  try {
+    const res = await fetch(`${getApiBase()}/meter-reading`)
+    if (res.ok) {
+      const data = await res.json()
+      meterTrackingEnabled.value = data.enabled && data.forecast?.usage_to_date !== null
+    }
+  } catch {
+    meterTrackingEnabled.value = false
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([loadHaEntities(), loadConfig(), loadSchedule()])
+  await Promise.all([loadHaEntities(), loadConfig(), loadSchedule(), checkMeterTracking()])
   loading.value = false
 })
 </script>
@@ -1080,5 +1104,33 @@ onMounted(async () => {
 .tts-message.error {
   background: #ffebee;
   color: #c62828;
+}
+
+/* Meter Tracking Active Notice */
+.tts-meter-active {
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+  border: 1px solid #64b5f6;
+}
+
+.tts-meter-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.tts-meter-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.tts-meter-notice strong {
+  color: #1565c0;
+  font-size: 0.95rem;
+}
+
+.tts-meter-notice p {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.85rem;
+  color: #1976d2;
 }
 </style>
