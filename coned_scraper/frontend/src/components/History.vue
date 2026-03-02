@@ -88,7 +88,7 @@
             @click="activeChartTab = 'rates'"
           >
             <span class="ha-tab-icon">🔌</span>
-            <span class="ha-tab-label">Supply vs Delivery</span>
+            <span class="ha-tab-label">Supply & Delivery Charges</span>
           </button>
         </div>
         
@@ -103,7 +103,7 @@
             <canvas ref="kwhCostChart"></canvas>
           </div>
           
-          <!-- Supply vs Delivery Rates -->
+          <!-- Supply & Delivery Charges -->
           <div v-show="activeChartTab === 'rates'" class="ha-chart-container">
             <canvas ref="supplyDeliveryChart"></canvas>
           </div>
@@ -464,36 +464,50 @@ function createCharts() {
     }
   }
 
-  // Supply vs Delivery Rates Chart ($/kWh)
+  // Supply & Delivery Charges Chart ($/kWh) - Line Chart
   if (supplyDeliveryChart.value) {
     const ctx = supplyDeliveryChart.value.getContext('2d')
     if (ctx) {
       chartInstances.push(new Chart(ctx, {
-        type: 'bar',
+        type: 'line',
         data: {
           labels,
           datasets: [
             {
               label: 'Supply Rate',
               data: chartData.map(r => r.supply_rate || 0),
-              backgroundColor: 'rgba(255, 159, 64, 0.7)',
               borderColor: 'rgba(255, 159, 64, 1)',
-              borderWidth: 1,
-              borderRadius: 4
+              backgroundColor: 'rgba(255, 159, 64, 0.1)',
+              borderWidth: 2,
+              pointBackgroundColor: 'rgba(255, 159, 64, 1)',
+              pointBorderColor: '#fff',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              tension: 0.3,
+              fill: true
             },
             {
               label: 'Delivery Rate',
               data: chartData.map(r => r.delivery_rate || 0),
-              backgroundColor: 'rgba(75, 192, 192, 0.7)',
               borderColor: 'rgba(75, 192, 192, 1)',
-              borderWidth: 1,
-              borderRadius: 4
+              backgroundColor: 'rgba(75, 192, 192, 0.1)',
+              borderWidth: 2,
+              pointBackgroundColor: 'rgba(75, 192, 192, 1)',
+              pointBorderColor: '#fff',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              tension: 0.3,
+              fill: true
             }
           ]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          interaction: {
+            intersect: false,
+            mode: 'index'
+          },
           plugins: {
             legend: { position: 'top' },
             tooltip: {
@@ -505,11 +519,7 @@ function createCharts() {
           scales: {
             y: {
               beginAtZero: true,
-              stacked: true,
               title: { display: true, text: '$/kWh' }
-            },
-            x: {
-              stacked: true
             }
           }
         }

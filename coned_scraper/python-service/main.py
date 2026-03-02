@@ -2357,19 +2357,26 @@ async def get_ha_entities():
 
 
 @app.get("/api/tts/preview-message")
-async def preview_tts_message():
-    """Generate preview data for TTS message template variables"""
+async def preview_tts_message(
+    current_sensor: str = None,
+    future_sensor: str = None
+):
+    """Generate preview data for TTS message template variables.
+    
+    Optional query params allow passing current sensor values from frontend
+    (in case they haven't been saved yet).
+    """
     from datetime import datetime
     from database import get_latest_bill_with_details
     from tts_scheduler import get_scheduler
-    
+
     ledger = get_ledger_data()
-    
-    # Get schedule config for sensors
+
+    # Get schedule config for sensors - use query params if provided, otherwise use saved config
     scheduler = get_scheduler()
     schedule_config = scheduler.load_schedule_config()
-    current_usage_sensor = schedule_config.get("current_usage_sensor", "")
-    future_usage_sensor = schedule_config.get("future_usage_sensor", "")
+    current_usage_sensor = current_sensor if current_sensor else schedule_config.get("current_usage_sensor", "")
+    future_usage_sensor = future_sensor if future_sensor else schedule_config.get("future_usage_sensor", "")
     
     # Get time info
     now = datetime.now()

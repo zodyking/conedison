@@ -434,7 +434,17 @@ function insertScheduleVar(varName: string) {
 
 async function generatePreview() {
   try {
-    const res = await fetch(`${getApiBase()}/tts/preview-message`)
+    // Pass current sensor values as query params (in case not saved yet)
+    const params = new URLSearchParams()
+    if (schedule.current_usage_sensor) {
+      params.append('current_sensor', schedule.current_usage_sensor)
+    }
+    if (schedule.future_usage_sensor) {
+      params.append('future_sensor', schedule.future_usage_sensor)
+    }
+    const queryString = params.toString()
+    const url = `${getApiBase()}/tts/preview-message${queryString ? '?' + queryString : ''}`
+    const res = await fetch(url)
     if (res.ok) {
       const data = await res.json()
       let msg = schedule.message_template || ''
