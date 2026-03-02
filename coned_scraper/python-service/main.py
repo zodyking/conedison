@@ -1008,10 +1008,7 @@ async def ha_admin_reset_password(data: HaAdminResetPasswordModel, request: Requ
     
     if not token:
         raise HTTPException(status_code=403, detail="PIN reset only available in Home Assistant addon mode")
-        except:
-            pass
     
-    if ha_user.lower() != "admin":
     if len(data.new_password) < 4:
         raise HTTPException(status_code=400, detail="PIN must be at least 4 characters")
     
