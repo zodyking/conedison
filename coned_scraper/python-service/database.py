@@ -655,9 +655,15 @@ def get_bill_history_for_graph() -> List[Dict[str, Any]]:
 
 
 def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
-    """Get the most recent bill with its parsed details (for sensors)"""
+    """Get the most recent bill that has parsed details (for sensors).
+    
+    Returns the latest bill that has an entry in bill_details table.
+    If no bills have details, falls back to the latest bill with NULL details.
+    """
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # First try to get the latest bill that HAS parsed details
     cursor.execute('''
         SELECT 
             b.*,
@@ -670,11 +676,30 @@ def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
             bd.supply_charges_json,
             bd.delivery_charges_json
         FROM bills b
-        LEFT JOIN bill_details bd ON b.id = bd.bill_id
+        INNER JOIN bill_details bd ON b.id = bd.bill_id
         ORDER BY b.bill_cycle_date DESC
         LIMIT 1
     ''')
     row = cursor.fetchone()
+    
+    # If no bill has details, fall back to latest bill (with NULL details)
+    if not row:
+        cursor.execute('''
+            SELECT 
+                b.*,
+                NULL as due_date,
+                NULL as kwh_used,
+                NULL as kwh_cost,
+                NULL as electricity_total,
+                NULL as total_from_billing_period,
+                NULL as billing_days,
+                NULL as supply_charges_json,
+                NULL as delivery_charges_json
+            FROM bills b
+            ORDER BY b.bill_cycle_date DESC
+            LIMIT 1
+        ''')
+        row = cursor.fetchone()
     conn.close()
     
     if not row:
