@@ -106,7 +106,7 @@
           <table class="ha-history-table">
             <thead>
               <tr>
-                <th>Period</th>
+                <th>Bill Cycle</th>
                 <th>kWh</th>
                 <th>$/kWh</th>
                 <th>Supply</th>
@@ -115,8 +115,8 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in historyData.slice().reverse()" :key="row.bill_id">
-                <td>{{ row.month_range || '—' }}</td>
+              <tr v-for="row in sortedHistoryDesc" :key="row.bill_id">
+                <td>{{ formatBillCycleDate(row.bill_cycle_date) }}</td>
                 <td>{{ formatNumber(row.kwh_used) }}</td>
                 <td>{{ row.kwh_cost ? `$${row.kwh_cost.toFixed(4)}` : '—' }}</td>
                 <td>{{ row.supply_total ? `$${row.supply_total.toFixed(2)}` : '—' }}</td>
@@ -209,9 +209,27 @@ const averageBill = computed(() => {
   return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length).toLocaleString()
 })
 
+const sortedHistoryDesc = computed(() => {
+  return [...historyData.value].sort((a, b) => {
+    const dateA = a.bill_cycle_date || ''
+    const dateB = b.bill_cycle_date || ''
+    return dateB.localeCompare(dateA)
+  })
+})
+
 function formatNumber(val: number | null | undefined): string {
   if (val == null) return '—'
   return val.toLocaleString()
+}
+
+function formatBillCycleDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch {
+    return dateStr
+  }
 }
 
 async function fetchHistory() {
