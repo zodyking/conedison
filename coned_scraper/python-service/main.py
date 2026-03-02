@@ -2228,6 +2228,7 @@ class TTSScheduleModel(BaseModel):
     start_time: Optional[str] = None  # Active hours start "HH:MM"
     end_time: Optional[str] = None  # Active hours end "HH:MM"
     days_of_week: Optional[list] = None  # ["mon", "tue", ...]
+    message_template: Optional[str] = None  # Custom message template with placeholders
     schedule_times: Optional[list] = None  # Legacy: List of TTSScheduleTimeModel dicts
     schedule_type: Optional[str] = None  # Legacy: "daily" or "specific_days"
 

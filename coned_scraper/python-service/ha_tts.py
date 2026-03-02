@@ -77,18 +77,26 @@ async def send_tts(
     volume: float = 0.7,
     wait_for_idle: bool = True,
     tts_service: str = "tts.google_translate_say",
+    language: str = "",
+    cache: bool = False,
 ) -> tuple[bool, str]:
     """
-    Send TTS via Home Assistant. Returns (success, error_message).
-    Uses direct HA REST API when running as addon with homeassistant_api.
+    Send TTS via Home Assistant using tts.speak service (HA 2024+).
+    Uses direct HA REST API when running as addon.
     
-    Supports both new (tts.speak) and legacy (tts.<service>_say) formats:
-    - New format (HA 2024+): tts.speak with target entity_id
-    - Legacy format: tts.google_translate_say, etc.
+    Args:
+        message: The text to speak
+        media_player: Target media player entity_id
+        volume: Volume level 0.0-1.0
+        wait_for_idle: Wait for media player to be idle before playing
+        tts_service: TTS entity (e.g., tts.google_en_com) or legacy service name
+        language: Optional language code
+        cache: Whether to cache the TTS audio
     """
     if not message or not media_player:
         return False, "Message and media player required"
     media_player = media_player.strip()
+    tts_service = tts_service.strip() if tts_service else "tts.google_translate_say"
 
     if wait_for_idle:
         idle = await _wait_for_idle(media_player)
@@ -104,45 +112,43 @@ async def send_tts(
     if status not in (200, 201):
         logger.warning(f"Volume set returned {status}, continuing with TTS")
 
-    # Try the new tts.speak format first (HA 2024+)
-    # tts.speak requires: entity_id (tts entity), media_player_entity_id, message
-    if tts_service.startswith("tts.") and not tts_service.endswith("_say"):
-        # New format: tts_service is the TTS entity (e.g., tts.google_en_com)
+    # Build service data for tts.speak (the modern HA way)
+    service_data = {
+        "media_player_entity_id": media_player,
+        "message": message,
+        "cache": cache,
+    }
+    
+    # Only add language if non-empty
+    if language and language.strip():
+        service_data["language"] = language.strip()
+    
+    # Use tts.speak with target entity_id pointing to the TTS entity
+    # This is how home-weather does it
+    status, data = await _ha_request(
+        "POST",
+        "/api/services/tts/speak",
+        {
+            **service_data,
+            "entity_id": tts_service,  # TTS entity as target
+        },
+    )
+    
+    if status in (200, 201):
+        logger.info(f"TTS sent to {media_player} via tts.speak targeting {tts_service}")
+        return True, ""
+    
+    # Fallback: try legacy format for older TTS services like tts.google_translate_say
+    if "_say" in tts_service or "_speak" in tts_service:
+        domain, service = tts_service.split(".", 1) if "." in tts_service else ("tts", "google_translate_say")
         status, data = await _ha_request(
             "POST",
-            "/api/services/tts/speak",
-            {
-                "entity_id": tts_service,
-                "media_player_entity_id": media_player,
-                "message": message,
-            },
+            f"/api/services/{domain}/{service}",
+            {"entity_id": media_player, "message": message},
         )
         if status in (200, 201):
-            logger.info(f"TTS sent to {media_player} via tts.speak")
+            logger.info(f"TTS sent to {media_player} via legacy {domain}/{service}")
             return True, ""
-        logger.warning(f"tts.speak returned {status}, trying legacy format...")
-    
-    # Try legacy format (tts.google_translate_say, tts.cloud_say, etc.)
-    domain, service = tts_service.split(".", 1) if "." in tts_service else ("tts", "google_translate_say")
-    
-    status, data = await _ha_request(
-        "POST",
-        f"/api/services/{domain}/{service}",
-        {"entity_id": media_player, "message": message},
-    )
-    if status in (200, 201):
-        logger.info(f"TTS sent to {media_player} via {domain}/{service}")
-        return True, ""
-    
-    # If legacy format also failed, try with media_player_entity_id (some TTS services use this)
-    status, data = await _ha_request(
-        "POST",
-        f"/api/services/{domain}/{service}",
-        {"media_player_entity_id": media_player, "message": message},
-    )
-    if status in (200, 201):
-        logger.info(f"TTS sent to {media_player} via {domain}/{service} (media_player_entity_id)")
-        return True, ""
     
     error_msg = f"TTS service returned {status}"
     if data and isinstance(data, dict) and data.get("message"):

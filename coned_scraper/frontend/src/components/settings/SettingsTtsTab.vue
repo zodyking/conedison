@@ -7,17 +7,18 @@
     </div>
 
     <template v-else>
-      <!-- General TTS Settings -->
+      <!-- Event TTS Alerts (new bill, payment received) -->
       <div class="tts-section">
-        <div class="tts-section-header" @click="toggleSection('general')">
+        <div class="tts-section-header" @click="toggleSection('alerts')">
           <div class="tts-section-title">
-            <span class="tts-section-icon">🔊</span>
-            <span>General TTS Settings</span>
+            <span class="tts-section-icon">🔔</span>
+            <span>Event TTS Alerts</span>
           </div>
-          <span class="tts-section-chevron" :class="{ expanded: expandedSections.general }">▼</span>
+          <span class="tts-section-sub">New bill & payment notifications</span>
+          <span class="tts-section-chevron" :class="{ expanded: expandedSections.alerts }">▼</span>
         </div>
         
-        <div v-if="expandedSections.general" class="tts-section-content">
+        <div v-if="expandedSections.alerts" class="tts-section-content">
           <div class="tts-toggle-row">
             <label class="tts-toggle">
               <input v-model="config.enabled" type="checkbox" />
@@ -25,99 +26,132 @@
             </label>
             <span class="tts-toggle-label">Enable TTS Alerts</span>
           </div>
+          <p class="tts-hint">Announce when new bills arrive or payments are received</p>
 
-          <div class="tts-form-group">
-            <label class="tts-label">Media Player <span class="tts-required">*</span></label>
-            <select v-model="config.media_player" class="tts-select">
-              <option value="">-- Select Media Player --</option>
-              <option v-for="mp in mediaPlayers" :key="mp.entity_id" :value="mp.entity_id">
-                {{ mp.friendly_name }} ({{ mp.state }})
-              </option>
-            </select>
-            <p v-if="!isAddon" class="tts-hint tts-hint-warning">
-              ⚠️ Not running as HA addon. Enter media player entity ID manually.
-            </p>
-            <input
-              v-if="!isAddon || mediaPlayers.length === 0"
-              v-model="config.media_player"
-              type="text"
-              class="tts-input"
-              placeholder="media_player.living_room"
-            />
-          </div>
-
-          <div class="tts-form-group">
-            <label class="tts-label">TTS Service <span class="tts-required">*</span></label>
-            <select v-model="config.tts_service" class="tts-select">
-              <option value="">-- Select TTS Service --</option>
-              <option v-for="tts in ttsEntities" :key="tts.entity_id" :value="tts.entity_id">
-                {{ tts.friendly_name }}
-              </option>
-              <option value="tts.google_translate_say">tts.google_translate_say</option>
-              <option value="tts.cloud_say">tts.cloud_say</option>
-              <option value="tts.piper">tts.piper</option>
-            </select>
-            <input
-              v-if="!isAddon || ttsEntities.length === 0"
-              v-model="config.tts_service"
-              type="text"
-              class="tts-input"
-              placeholder="tts.google_translate_say"
-            />
-          </div>
-
-          <div class="tts-form-group">
-            <label class="tts-label">Volume</label>
-            <div class="tts-volume-row">
+          <template v-if="config.enabled">
+            <div class="tts-form-group">
+              <label class="tts-label">Media Player <span class="tts-required">*</span></label>
+              <select v-model="config.media_player" class="tts-select">
+                <option value="">-- Select Media Player --</option>
+                <option v-for="mp in mediaPlayers" :key="mp.entity_id" :value="mp.entity_id">
+                  {{ mp.friendly_name }} ({{ mp.state }})
+                </option>
+              </select>
               <input
-                v-model.number="config.volume"
-                type="range"
-                class="tts-volume-slider"
-                min="0"
-                max="1"
-                step="0.05"
+                v-if="!isAddon || mediaPlayers.length === 0"
+                v-model="config.media_player"
+                type="text"
+                class="tts-input tts-input-mt"
+                placeholder="media_player.living_room"
               />
-              <span class="tts-volume-value">{{ Math.round((config.volume || 0) * 100) }}%</span>
             </div>
+
+            <div class="tts-form-group">
+              <label class="tts-label">TTS Entity <span class="tts-required">*</span></label>
+              <select v-model="config.tts_service" class="tts-select">
+                <option value="">-- Select TTS Entity --</option>
+                <option v-for="tts in ttsEntities" :key="tts.entity_id" :value="tts.entity_id">
+                  {{ tts.friendly_name }}
+                </option>
+              </select>
+              <input
+                v-if="!isAddon || ttsEntities.length === 0"
+                v-model="config.tts_service"
+                type="text"
+                class="tts-input tts-input-mt"
+                placeholder="tts.google_en_com"
+              />
+            </div>
+
+            <div class="tts-form-group">
+              <label class="tts-label">Volume</label>
+              <div class="tts-volume-row">
+                <input
+                  v-model.number="config.volume"
+                  type="range"
+                  class="tts-volume-slider"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                />
+                <span class="tts-volume-value">{{ Math.round((config.volume || 0) * 100) }}%</span>
+              </div>
+            </div>
+
+            <div class="tts-toggle-row">
+              <label class="tts-toggle">
+                <input v-model="config.wait_for_idle" type="checkbox" />
+                <span class="tts-toggle-slider"></span>
+              </label>
+              <span class="tts-toggle-label">Wait for media player idle</span>
+            </div>
+
+            <!-- Message Templates -->
+            <div class="tts-subsection">
+              <h4 class="tts-subsection-title">Message Templates</h4>
+              <p class="tts-hint">Click a variable to insert it into the template</p>
+
+              <div class="tts-form-group">
+                <label class="tts-label">New Bill Message</label>
+                <div class="tts-var-chips">
+                  <span class="tts-var-chip" @click="insertVar('new_bill', '{month_range}')">{month_range}</span>
+                  <span class="tts-var-chip" @click="insertVar('new_bill', '{amount}')">{amount}</span>
+                  <span class="tts-var-chip" @click="insertVar('new_bill', '{due_date}')">{due_date}</span>
+                </div>
+                <textarea
+                  ref="newBillInput"
+                  v-model="config.messages.new_bill"
+                  class="tts-textarea"
+                  rows="2"
+                  placeholder="Your new Con Edison bill for {month_range} is {amount}."
+                ></textarea>
+              </div>
+
+              <div class="tts-form-group">
+                <label class="tts-label">Payment Received Message</label>
+                <div class="tts-var-chips">
+                  <span class="tts-var-chip" @click="insertVar('payment_received', '{amount}')">{amount}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_received', '{balance}')">{balance}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_received', '{payee_name}')">{payee_name}</span>
+                </div>
+                <textarea
+                  ref="paymentInput"
+                  v-model="config.messages.payment_received"
+                  class="tts-textarea"
+                  rows="2"
+                  placeholder="Payment of {amount} received. Balance is now {balance}."
+                ></textarea>
+              </div>
+            </div>
+          </template>
+
+          <div class="tts-actions-row">
+            <button class="tts-btn tts-btn-primary" :disabled="saving" @click="saveConfig">
+              {{ saving ? 'Saving...' : 'Save Alert Settings' }}
+            </button>
+            <button
+              class="tts-btn tts-btn-orange"
+              :disabled="!config.enabled || !config.media_player || testing"
+              @click="testTts"
+            >
+              {{ testing ? 'Sending...' : 'Test TTS' }}
+            </button>
           </div>
 
-          <div class="tts-form-group">
-            <label class="tts-label">Language</label>
-            <input
-              v-model="config.language"
-              type="text"
-              class="tts-input"
-              placeholder="en, en-US"
-            />
-          </div>
-
-          <div class="tts-toggle-row">
-            <label class="tts-toggle">
-              <input v-model="config.wait_for_idle" type="checkbox" />
-              <span class="tts-toggle-slider"></span>
-            </label>
-            <span class="tts-toggle-label">Wait for media player idle</span>
-          </div>
-          <p class="tts-hint">Only play when media player is idle; otherwise wait up to 5 minutes</p>
-
-          <button class="tts-btn tts-btn-primary" :disabled="saving" @click="saveConfig">
-            {{ saving ? 'Saving...' : 'Save Settings' }}
-          </button>
-
-          <div v-if="generalMessage" :class="['tts-message', generalMessage.type]">
-            {{ generalMessage.text }}
+          <div v-if="alertMessage" :class="['tts-message', alertMessage.type]">
+            {{ alertMessage.text }}
           </div>
         </div>
       </div>
 
-      <!-- Scheduled TTS -->
+      <!-- Scheduled Announcements -->
       <div class="tts-section">
         <div class="tts-section-header" @click="toggleSection('schedule')">
           <div class="tts-section-title">
             <span class="tts-section-icon">⏰</span>
             <span>Scheduled Announcements</span>
           </div>
-          <span class="tts-section-sub">Bill summary at scheduled times</span>
+          <span class="tts-section-sub">Automatic bill summary at set times</span>
           <span class="tts-section-chevron" :class="{ expanded: expandedSections.schedule }">▼</span>
         </div>
         
@@ -127,8 +161,9 @@
               <input v-model="schedule.enabled" type="checkbox" />
               <span class="tts-toggle-slider"></span>
             </label>
-            <span class="tts-toggle-label">Enable Scheduled TTS</span>
+            <span class="tts-toggle-label">Enable Scheduled Announcements</span>
           </div>
+          <p class="tts-hint">Requires TTS alerts to be enabled and configured above</p>
 
           <template v-if="schedule.enabled">
             <div class="tts-form-group">
@@ -148,11 +183,11 @@
               <input
                 v-model.number="schedule.minute_offset"
                 type="number"
-                class="tts-input"
+                class="tts-input tts-input-small"
                 min="0"
                 max="59"
               />
-              <p class="tts-hint">e.g., 3 means announcements at :03 past the hour</p>
+              <p class="tts-hint">e.g., 3 = announcements at :03 past the hour</p>
             </div>
 
             <div class="tts-form-group">
@@ -182,26 +217,51 @@
                 </label>
               </div>
             </div>
-          </template>
 
-          <div class="tts-form-group">
-            <label class="tts-label">Message Prefix</label>
-            <input
-              v-model="config.prefix"
-              type="text"
-              class="tts-input"
-              placeholder="Message from Con Edison."
-            />
-            <p class="tts-hint">Prepended to every TTS message</p>
-          </div>
+            <!-- Schedule Message Builder -->
+            <div class="tts-subsection">
+              <h4 class="tts-subsection-title">Scheduled Message Template</h4>
+              <p class="tts-hint">Build your bill summary message. Click variables to insert.</p>
+
+              <div class="tts-var-chips">
+                <span class="tts-var-chip" @click="insertScheduleVar('{greeting}')">{greeting}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{time}')">{time}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{balance}')">{balance}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{latest_bill_amount}')">{latest_bill_amount}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{latest_bill_period}')">{latest_bill_period}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{due_date}')">{due_date}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{last_payment_amount}')">{last_payment_amount}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{last_payment_date}')">{last_payment_date}</span>
+                <span class="tts-var-chip" @click="insertScheduleVar('{kwh_used}')">{kwh_used}</span>
+              </div>
+
+              <textarea
+                ref="scheduleMessageInput"
+                v-model="schedule.message_template"
+                class="tts-textarea tts-textarea-lg"
+                rows="4"
+                placeholder="{greeting}, the time is {time}. Your Con Edison balance is {balance}. Your latest bill for {latest_bill_period} is {latest_bill_amount}."
+              ></textarea>
+
+              <div class="tts-preview-section">
+                <button class="tts-btn tts-btn-secondary tts-btn-sm" @click="generatePreview">
+                  Preview Message
+                </button>
+                <div v-if="previewMessage" class="tts-preview-box">
+                  <span class="tts-preview-label">Preview:</span>
+                  {{ previewMessage }}
+                </div>
+              </div>
+            </div>
+          </template>
 
           <div class="tts-actions-row">
             <button class="tts-btn tts-btn-primary" :disabled="scheduleSaving" @click="saveSchedule">
               {{ scheduleSaving ? 'Saving...' : 'Save Schedule' }}
             </button>
             <button
-              class="tts-btn tts-btn-secondary"
-              :disabled="!config.enabled || !config.media_player"
+              class="tts-btn tts-btn-orange"
+              :disabled="!config.enabled || !config.media_player || testingSummary"
               @click="testBillSummary"
             >
               {{ testingSummary ? 'Sending...' : 'Test Bill Summary' }}
@@ -210,104 +270,6 @@
 
           <div v-if="scheduleMessage" :class="['tts-message', scheduleMessage.type]">
             {{ scheduleMessage.text }}
-          </div>
-        </div>
-      </div>
-
-      <!-- Message Preview -->
-      <div class="tts-section">
-        <div class="tts-section-header" @click="toggleSection('preview')">
-          <div class="tts-section-title">
-            <span class="tts-section-icon">👁️</span>
-            <span>Message Preview</span>
-          </div>
-          <span class="tts-section-sub">See what TTS will say</span>
-          <span class="tts-section-chevron" :class="{ expanded: expandedSections.preview }">▼</span>
-        </div>
-        
-        <div v-if="expandedSections.preview" class="tts-section-content">
-          <button class="tts-btn tts-btn-secondary" :disabled="loadingPreview" @click="loadPreview">
-            {{ loadingPreview ? 'Generating...' : 'Generate Preview' }}
-          </button>
-
-          <div v-if="previewMessage" class="tts-preview-box">
-            <div class="tts-preview-label">TTS Message:</div>
-            <div class="tts-preview-text">{{ previewMessage }}</div>
-          </div>
-
-          <div v-if="previewData" class="tts-preview-data">
-            <div class="tts-preview-item">
-              <span class="tts-preview-key">Greeting:</span>
-              <span>{{ previewData.greeting }}</span>
-            </div>
-            <div class="tts-preview-item">
-              <span class="tts-preview-key">Time:</span>
-              <span>{{ previewData.time }}</span>
-            </div>
-            <div class="tts-preview-item">
-              <span class="tts-preview-key">Balance:</span>
-              <span>{{ previewData.balance ?? 'N/A' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Message Templates -->
-      <div class="tts-section">
-        <div class="tts-section-header" @click="toggleSection('templates')">
-          <div class="tts-section-title">
-            <span class="tts-section-icon">📝</span>
-            <span>Message Templates</span>
-          </div>
-          <span class="tts-section-sub">Customize event messages</span>
-          <span class="tts-section-chevron" :class="{ expanded: expandedSections.templates }">▼</span>
-        </div>
-        
-        <div v-if="expandedSections.templates" class="tts-section-content">
-          <p class="tts-hint">
-            Use <code>{placeholder}</code> for variables:
-            <code>{amount}</code>, <code>{balance}</code>, <code>{month_range}</code>
-          </p>
-
-          <div v-for="(template, key) in config.messages" :key="key" class="tts-form-group">
-            <label class="tts-label">{{ formatLabel(key) }}</label>
-            <input
-              v-model="config.messages[key]"
-              type="text"
-              class="tts-input"
-              :placeholder="defaultMessages[key]"
-            />
-          </div>
-
-          <button class="tts-btn tts-btn-primary" :disabled="saving" @click="saveConfig">
-            {{ saving ? 'Saving...' : 'Save Templates' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Test TTS -->
-      <div class="tts-section">
-        <div class="tts-section-header" @click="toggleSection('test')">
-          <div class="tts-section-title">
-            <span class="tts-section-icon">🧪</span>
-            <span>Test TTS</span>
-          </div>
-          <span class="tts-section-chevron" :class="{ expanded: expandedSections.test }">▼</span>
-        </div>
-        
-        <div v-if="expandedSections.test" class="tts-section-content">
-          <p class="tts-hint">Send a test message to verify your TTS configuration.</p>
-          
-          <button
-            class="tts-btn tts-btn-orange"
-            :disabled="!config.enabled || !config.media_player || testing"
-            @click="testTts"
-          >
-            {{ testing ? 'Sending...' : 'Send Test TTS' }}
-          </button>
-
-          <div v-if="testMessage" :class="['tts-message', testMessage.type]">
-            {{ testMessage.text }}
           </div>
         </div>
       </div>
@@ -325,73 +287,50 @@ interface HaEntity {
   state?: string
 }
 
-interface TtsConfig {
-  enabled: boolean
-  media_player: string
-  volume: number
-  language: string
-  tts_service: string
-  prefix: string
-  wait_for_idle: boolean
-  messages: Record<string, string>
-}
-
-interface Schedule {
-  enabled: boolean
-  hour_pattern: number
-  minute_offset: number
-  start_time: string
-  end_time: string
-  days_of_week: string[]
-}
-
 const loading = ref(true)
 const saving = ref(false)
 const scheduleSaving = ref(false)
 const testing = ref(false)
 const testingSummary = ref(false)
-const loadingPreview = ref(false)
 
 const isAddon = ref(false)
 const mediaPlayers = ref<HaEntity[]>([])
 const ttsEntities = ref<HaEntity[]>([])
 
-const config = reactive<TtsConfig>({
+const newBillInput = ref<HTMLTextAreaElement | null>(null)
+const paymentInput = ref<HTMLTextAreaElement | null>(null)
+const scheduleMessageInput = ref<HTMLTextAreaElement | null>(null)
+
+const config = reactive({
   enabled: false,
   media_player: '',
   volume: 0.7,
-  language: 'en',
-  tts_service: 'tts.google_translate_say',
-  prefix: 'Message from Con Edison.',
+  tts_service: '',
   wait_for_idle: true,
   messages: {
-    new_bill: 'Your new Con Edison bill for {month_range} is now available.',
-    payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
+    new_bill: 'Your new Con Edison bill for {month_range} is now available. The total is {amount}.',
+    payment_received: 'Good news! Your payment of {amount} has been received. Your account balance is now {balance}.',
   }
 })
 
-const schedule = reactive<Schedule>({
+const schedule = reactive({
   enabled: false,
   hour_pattern: 3,
   minute_offset: 0,
   start_time: '08:00',
   end_time: '21:00',
-  days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri']
+  days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
+  message_template: '{greeting}, the time is {time}. Your Con Edison balance is {balance}. Your latest bill for {latest_bill_period} is {latest_bill_amount}.'
 })
 
 const expandedSections = reactive({
-  general: true,
-  schedule: false,
-  preview: false,
-  templates: false,
-  test: false
+  alerts: true,
+  schedule: false
 })
 
-const generalMessage = ref<{ type: string; text: string } | null>(null)
+const alertMessage = ref<{ type: string; text: string } | null>(null)
 const scheduleMessage = ref<{ type: string; text: string } | null>(null)
-const testMessage = ref<{ type: string; text: string } | null>(null)
 const previewMessage = ref('')
-const previewData = ref<any>(null)
 
 const dayOptions = [
   { value: 'mon', label: 'Mon' },
@@ -402,11 +341,6 @@ const dayOptions = [
   { value: 'sat', label: 'Sat' },
   { value: 'sun', label: 'Sun' }
 ]
-
-const defaultMessages: Record<string, string> = {
-  new_bill: 'Your new Con Edison bill for {month_range} is now available.',
-  payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
-}
 
 function toggleSection(key: keyof typeof expandedSections) {
   expandedSections[key] = !expandedSections[key]
@@ -422,8 +356,58 @@ function toggleDay(day: string) {
   }
 }
 
-function formatLabel(key: string): string {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+function insertVar(templateKey: 'new_bill' | 'payment_received', varName: string) {
+  const inputRef = templateKey === 'new_bill' ? newBillInput.value : paymentInput.value
+  if (!inputRef) {
+    config.messages[templateKey] += varName
+    return
+  }
+  const start = inputRef.selectionStart || 0
+  const end = inputRef.selectionEnd || 0
+  const text = config.messages[templateKey]
+  config.messages[templateKey] = text.slice(0, start) + varName + text.slice(end)
+  setTimeout(() => {
+    inputRef.focus()
+    inputRef.setSelectionRange(start + varName.length, start + varName.length)
+  }, 0)
+}
+
+function insertScheduleVar(varName: string) {
+  const inputRef = scheduleMessageInput.value
+  if (!inputRef) {
+    schedule.message_template += varName
+    return
+  }
+  const start = inputRef.selectionStart || 0
+  const end = inputRef.selectionEnd || 0
+  const text = schedule.message_template
+  schedule.message_template = text.slice(0, start) + varName + text.slice(end)
+  setTimeout(() => {
+    inputRef.focus()
+    inputRef.setSelectionRange(start + varName.length, start + varName.length)
+  }, 0)
+}
+
+async function generatePreview() {
+  try {
+    const res = await fetch(`${getApiBase()}/tts/preview-message`)
+    if (res.ok) {
+      const data = await res.json()
+      let msg = schedule.message_template || ''
+      msg = msg.replace(/{greeting}/g, data.greeting || 'Good morning')
+      msg = msg.replace(/{time}/g, data.time || '')
+      msg = msg.replace(/{balance}/g, data.balance ?? 'N/A')
+      msg = msg.replace(/{latest_bill_amount}/g, data.latest_bill?.amount || 'N/A')
+      msg = msg.replace(/{latest_bill_period}/g, data.latest_bill?.month_range || 'N/A')
+      msg = msg.replace(/{due_date}/g, data.latest_bill?.due_date || 'N/A')
+      msg = msg.replace(/{last_payment_amount}/g, data.latest_payment?.amount || 'No payment')
+      msg = msg.replace(/{last_payment_date}/g, data.latest_payment?.payment_date || '')
+      msg = msg.replace(/{kwh_used}/g, data.latest_bill?.kwh_used || 'N/A')
+      previewMessage.value = msg
+    }
+  } catch (e) {
+    console.error('Failed to generate preview:', e)
+  }
 }
 
 async function loadHaEntities() {
@@ -448,12 +432,10 @@ async function loadConfig() {
       config.enabled = data.enabled ?? false
       config.media_player = data.media_player ?? ''
       config.volume = typeof data.volume === 'number' ? data.volume : 0.7
-      config.language = data.language ?? 'en'
-      config.tts_service = data.tts_service ?? 'tts.google_translate_say'
-      config.prefix = data.prefix ?? 'Message from Con Edison.'
+      config.tts_service = data.tts_service ?? ''
       config.wait_for_idle = data.wait_for_idle ?? true
       if (data.messages && typeof data.messages === 'object') {
-        config.messages = { ...defaultMessages, ...data.messages }
+        config.messages = { ...config.messages, ...data.messages }
       }
     }
   } catch (e) {
@@ -472,6 +454,7 @@ async function loadSchedule() {
       schedule.start_time = data.start_time ?? '08:00'
       schedule.end_time = data.end_time ?? '21:00'
       schedule.days_of_week = data.days_of_week ?? ['mon', 'tue', 'wed', 'thu', 'fri']
+      schedule.message_template = data.message_template ?? schedule.message_template
     }
   } catch (e) {
     console.error('Failed to load schedule:', e)
@@ -480,7 +463,7 @@ async function loadSchedule() {
 
 async function saveConfig() {
   saving.value = true
-  generalMessage.value = null
+  alertMessage.value = null
   try {
     const res = await fetch(`${getApiBase()}/tts-config`, {
       method: 'POST',
@@ -489,21 +472,19 @@ async function saveConfig() {
         enabled: config.enabled,
         media_player: config.media_player.trim(),
         volume: config.volume,
-        language: config.language,
-        prefix: config.prefix,
-        tts_service: config.tts_service || 'tts.google_translate_say',
+        tts_service: config.tts_service || '',
         wait_for_idle: config.wait_for_idle,
         messages: config.messages
       })
     })
     if (res.ok) {
-      generalMessage.value = { type: 'success', text: 'TTS settings saved' }
+      alertMessage.value = { type: 'success', text: 'Alert settings saved' }
     } else {
       const err = await res.json().catch(() => ({}))
-      generalMessage.value = { type: 'error', text: err.detail || 'Failed to save' }
+      alertMessage.value = { type: 'error', text: err.detail || 'Failed to save' }
     }
   } catch {
-    generalMessage.value = { type: 'error', text: 'Failed to connect' }
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
   } finally {
     saving.value = false
   }
@@ -522,7 +503,8 @@ async function saveSchedule() {
         minute_offset: schedule.minute_offset,
         start_time: schedule.start_time,
         end_time: schedule.end_time,
-        days_of_week: schedule.days_of_week
+        days_of_week: schedule.days_of_week,
+        message_template: schedule.message_template
       })
     })
     if (res.ok) {
@@ -540,17 +522,17 @@ async function saveSchedule() {
 
 async function testTts() {
   testing.value = true
-  testMessage.value = null
+  alertMessage.value = null
   try {
     const res = await fetch(`${getApiBase()}/tts/test`, { method: 'POST' })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
-      testMessage.value = { type: 'success', text: data.message || 'TTS sent' }
+      alertMessage.value = { type: 'success', text: data.message || 'TTS sent' }
     } else {
-      testMessage.value = { type: 'error', text: data.detail || 'Failed' }
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
     }
   } catch {
-    testMessage.value = { type: 'error', text: 'Failed to connect' }
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
   } finally {
     testing.value = false
   }
@@ -571,24 +553,6 @@ async function testBillSummary() {
     scheduleMessage.value = { type: 'error', text: 'Failed to connect' }
   } finally {
     testingSummary.value = false
-  }
-}
-
-async function loadPreview() {
-  loadingPreview.value = true
-  previewMessage.value = ''
-  previewData.value = null
-  try {
-    const res = await fetch(`${getApiBase()}/tts/preview-message`)
-    if (res.ok) {
-      const data = await res.json()
-      previewMessage.value = data.message || ''
-      previewData.value = data
-    }
-  } catch (e) {
-    console.error('Failed to load preview:', e)
-  } finally {
-    loadingPreview.value = false
   }
 }
 
@@ -685,6 +649,21 @@ onMounted(async () => {
   gap: 1rem;
 }
 
+.tts-subsection {
+  margin-top: 0.5rem;
+  padding: 1rem;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #eee;
+}
+
+.tts-subsection-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #444;
+}
+
 .tts-form-group {
   display: flex;
   flex-direction: column;
@@ -702,20 +681,40 @@ onMounted(async () => {
 }
 
 .tts-input,
-.tts-select {
+.tts-select,
+.tts-textarea {
   padding: 0.65rem 0.85rem;
   border: 1px solid #ddd;
   border-radius: 8px;
   font-size: 0.95rem;
   background: #fff;
   transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
 }
 
 .tts-input:focus,
-.tts-select:focus {
+.tts-select:focus,
+.tts-textarea:focus {
   outline: none;
   border-color: #ff9800;
   box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.1);
+}
+
+.tts-input-mt {
+  margin-top: 0.5rem;
+}
+
+.tts-input-small {
+  width: 100px;
+}
+
+.tts-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.tts-textarea-lg {
+  min-height: 100px;
 }
 
 .tts-select {
@@ -726,17 +725,6 @@ onMounted(async () => {
   font-size: 0.8rem;
   color: #888;
   margin-top: 0.25rem;
-}
-
-.tts-hint code {
-  background: #f0f0f0;
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-}
-
-.tts-hint-warning {
-  color: #f57c00;
 }
 
 .tts-toggle-row {
@@ -883,10 +871,55 @@ onMounted(async () => {
   color: white;
 }
 
+.tts-var-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.tts-var-chip {
+  padding: 0.25rem 0.6rem;
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: monospace;
+  color: #1565c0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tts-var-chip:hover {
+  background: #bbdefb;
+  border-color: #64b5f6;
+}
+
+.tts-preview-section {
+  margin-top: 0.75rem;
+}
+
+.tts-preview-box {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #5d4037;
+  line-height: 1.5;
+}
+
+.tts-preview-label {
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
 .tts-actions-row {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  margin-top: 0.5rem;
 }
 
 .tts-btn {
@@ -902,6 +935,11 @@ onMounted(async () => {
 .tts-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.tts-btn-sm {
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
 }
 
 .tts-btn-primary {
@@ -945,48 +983,5 @@ onMounted(async () => {
 .tts-message.error {
   background: #ffebee;
   color: #c62828;
-}
-
-.tts-preview-box {
-  background: #f5f5f5;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 1rem;
-}
-
-.tts-preview-label {
-  font-weight: 600;
-  color: #666;
-  font-size: 0.8rem;
-  margin-bottom: 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.tts-preview-text {
-  font-size: 1rem;
-  color: #333;
-  line-height: 1.6;
-  font-style: italic;
-}
-
-.tts-preview-data {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  background: #fafafa;
-  border-radius: 8px;
-}
-
-.tts-preview-item {
-  display: flex;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-}
-
-.tts-preview-key {
-  font-weight: 600;
-  color: #666;
 }
 </style>

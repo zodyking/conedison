@@ -37,6 +37,7 @@ class TTSScheduler:
             "start_time": "08:00",  # Active hours start
             "end_time": "21:00",  # Active hours end
             "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
+            "message_template": "{greeting}, the time is {time}. Your Con Edison balance is {balance}. Your latest bill for {latest_bill_period} is {latest_bill_amount}.",
             "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}
             "schedule_type": "daily",  # Legacy
             "updated_at": None
@@ -201,45 +202,83 @@ class TTSScheduler:
             logger.error(f"Error sending scheduled TTS: {e}")
     
     async def _build_bill_summary_message(self) -> str:
-        """Build the bill summary TTS message using ledger data."""
+        """Build the bill summary TTS message using ledger data and message template."""
         try:
             from database import get_ledger_data
             
+            schedule_config = self.load_schedule_config()
+            template = schedule_config.get("message_template", "")
+            
+            if not template:
+                template = "{greeting}, the time is {time}. Your Con Edison balance is {balance}."
+            
             ledger = get_ledger_data()
-            balance = ledger.get("account_balance", "")
+            
+            # Get current time info
+            now = datetime.now()
+            hour = now.hour
+            if 5 <= hour < 12:
+                greeting = "Good morning"
+            elif 12 <= hour < 17:
+                greeting = "Good afternoon"
+            elif 17 <= hour < 21:
+                greeting = "Good evening"
+            else:
+                greeting = "Good night"
+            
+            hour_12 = hour % 12 or 12
+            minute = now.minute
+            period = "AM" if hour < 12 else "PM"
+            if minute == 0:
+                time_str = f"{hour_12} {period}"
+            elif minute < 10:
+                time_str = f"{hour_12} oh {minute} {period}"
+            else:
+                time_str = f"{hour_12} {minute} {period}"
+            
+            # Get bill and payment data
+            balance = ledger.get("account_balance", "N/A")
             latest_bill = ledger.get("latest_bill", {})
-            latest_payment = ledger.get("latest_payment", {})
+            latest_payment = ledger.get("latest_payment")
+            bills = ledger.get("bills", [])
             
-            parts = []
+            # Build placeholder values
+            placeholders = {
+                "greeting": greeting,
+                "time": time_str,
+                "balance": balance or "N/A",
+                "latest_bill_amount": latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A"),
+                "latest_bill_period": latest_bill.get("month_range", "N/A"),
+                "due_date": "",
+                "last_payment_amount": "",
+                "last_payment_date": "",
+                "kwh_used": "",
+            }
             
-            # Current balance
-            if balance:
-                parts.append(f"Your current Con Edison balance is {balance}.")
+            # Try to get due date and kwh from bill details
+            if bills and len(bills) > 0:
+                first_bill = bills[0]
+                if isinstance(first_bill, dict):
+                    placeholders["due_date"] = first_bill.get("due_date", "N/A")
+                    placeholders["kwh_used"] = str(first_bill.get("kwh_used", "N/A"))
             
-            # Latest bill info
-            if latest_bill:
-                bill_total = latest_bill.get("bill_total", "")
-                month_range = latest_bill.get("month_range", "")
-                if bill_total and month_range:
-                    parts.append(f"Your latest bill for {month_range} is {bill_total}.")
+            # Payment info
+            if latest_payment and isinstance(latest_payment, dict):
+                placeholders["last_payment_amount"] = latest_payment.get("amount", "No payment")
+                placeholders["last_payment_date"] = latest_payment.get("payment_date", "")
+            else:
+                placeholders["last_payment_amount"] = "No payment"
+                placeholders["last_payment_date"] = ""
             
-            # Latest payment info
-            if latest_payment:
-                amount = latest_payment.get("amount", "")
-                payee_name = latest_payment.get("payee_name", "")
-                payment_date = latest_payment.get("payment_date", "")
-                if amount:
-                    payee_str = f"from {payee_name}" if payee_name else ""
-                    date_str = f"on {payment_date}" if payment_date else ""
-                    parts.append(f"Your last payment was {amount} {payee_str} {date_str}.".replace("  ", " "))
+            # Replace placeholders in template
+            message = template
+            for key, value in placeholders.items():
+                message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
             
-            if not parts:
-                return "No billing information is currently available."
-            
-            return " ".join(parts)
+            return message
         except Exception as e:
             logger.error(f"Error building bill summary message: {e}")
-            return ""
+            return "Your Con Edison bill summary is currently unavailable."
 
 
 # Global scheduler instance
