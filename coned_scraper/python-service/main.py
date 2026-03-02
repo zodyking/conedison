@@ -2428,19 +2428,22 @@ async def preview_tts_message():
     bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
     bill_period = latest_bill.get("month_range", "")
     
-    # Get kwh_used and kwh_cost from bill_details for the latest bill
+    # Get kwh_used and kwh_cost from bill_details for the SAME bill from ledger
+    from database import get_bill_details_by_id
     last_bill_kwh = ""
     kwh_cost = None
-    latest_bill_details = get_latest_bill_with_details()
+    latest_bill_id = latest_bill.get("id")
     
-    if latest_bill_details:
-        kwh_val = latest_bill_details.get("kwh_used")
-        if kwh_val:
-            last_bill_kwh = f"{kwh_val} kWh"
-        kwh_cost = latest_bill_details.get("kwh_cost")
-        # Use due_date from bill_details if not already set
-        if not due_date:
-            due_date = latest_bill_details.get("due_date", "") or ""
+    if latest_bill_id:
+        bill_details = get_bill_details_by_id(latest_bill_id)
+        if bill_details:
+            kwh_val = bill_details.get("kwh_used")
+            if kwh_val:
+                last_bill_kwh = f"{kwh_val} kWh"
+            kwh_cost = bill_details.get("kwh_cost")
+            # Use due_date from bill_details if not already set
+            if not due_date:
+                due_date = format_date_for_tts(bill_details.get("due_date", "") or "")
     
     # Fetch current and future usage from HA sensors
     current_usage_kwh = ""

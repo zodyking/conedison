@@ -228,7 +228,7 @@ class TTSScheduler:
     async def _build_bill_summary_message(self) -> str:
         """Build the bill summary TTS message using ledger data and message template."""
         try:
-            from database import get_ledger_data, get_latest_bill_with_details
+            from database import get_ledger_data, get_bill_details_by_id
             import aiohttp
             import os
             
@@ -243,7 +243,14 @@ class TTSScheduler:
                 template = "{prefix} Your current balance is {balance}. Your last bill was {latest_bill_amount}, using {last_bill_kwh}, due {due_date}."
             
             ledger = get_ledger_data()
-            bill_details = get_latest_bill_with_details()
+            
+            # Get latest bill from ledger (matches Account Ledger display order)
+            bills = ledger.get("bills", [])
+            latest_bill = bills[0] if bills else {}
+            latest_bill_id = latest_bill.get("id")
+            
+            # Get bill_details for the same bill
+            bill_details = get_bill_details_by_id(latest_bill_id) if latest_bill_id else None
             
             # Get balance from ledger
             balance = ledger.get("account_balance") or ledger.get("total_balance", "")
@@ -265,17 +272,13 @@ class TTSScheduler:
                         return f"{match.group(1)} {int(match.group(2))}"
                     return date_str
             
-            # Get latest bill data from ledger (matches Account Ledger display)
-            bills = ledger.get("bills", [])
-            latest_bill = bills[0] if bills else {}
-            
             bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
             
             # Get due_date from ledger (now included via get_ledger_data) - format for TTS
             due_date_raw = latest_bill.get("due_date", "") or ""
             due_date = format_date_for_tts(due_date_raw)
             
-            # Get kwh_used and kwh_cost from bill_details table
+            # Get kwh_used and kwh_cost from bill_details table (for the same bill)
             last_bill_kwh = ""
             kwh_cost = None
             

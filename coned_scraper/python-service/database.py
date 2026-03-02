@@ -650,6 +650,32 @@ def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
     return result
 
 
+def get_bill_details_by_id(bill_id: int) -> Optional[Dict[str, Any]]:
+    """Get bill details for a specific bill ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM bill_details WHERE bill_id = ?
+    ''', (bill_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    result = dict(row)
+    try:
+        result["supply_charges"] = json.loads(result.get("supply_charges_json") or "{}")
+    except:
+        result["supply_charges"] = {}
+    try:
+        result["delivery_charges"] = json.loads(result.get("delivery_charges_json") or "{}")
+    except:
+        result["delivery_charges"] = {}
+    
+    return result
+
+
 def delete_bill_details(bill_id: int) -> bool:
     """Remove bill details record"""
     conn = get_connection()
