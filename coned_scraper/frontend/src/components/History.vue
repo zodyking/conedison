@@ -104,6 +104,23 @@
         <div class="ha-chart-tab-content">
           <!-- Real Time Usage Chart (Last 24 Hours) -->
           <div v-show="activeChartTab === 'realtime'" class="ha-realtime-wrapper">
+            <div class="ha-realtime-header">
+              <span class="ha-realtime-title">
+                Last 24 Hours of Available Data
+                <span v-if="realtimeDataRange" class="ha-realtime-range">
+                  ({{ formatRealtimeRange(realtimeDataRange.first) }} — {{ formatRealtimeRange(realtimeDataRange.last) }})
+                </span>
+              </span>
+              <button 
+                class="ha-refresh-btn" 
+                @click="refreshRealtimeData" 
+                :disabled="realtimeLoading"
+                title="Fetch latest data from Con Edison"
+              >
+                <span :class="{ 'ha-spin': realtimeLoading }">🔄</span>
+                Refresh
+              </button>
+            </div>
             <div class="ha-chart-container ha-chart-container-tall">
               <div v-if="realtimeLoading" class="ha-realtime-loading">
                 <div class="ha-loading-spinner small"></div>
@@ -302,6 +319,16 @@ function formatBillTotal(row: HistoryRow): string {
   return `$${billTotal.toFixed(2)}`
 }
 
+function formatRealtimeRange(date: Date): string {
+  return date.toLocaleString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true 
+  })
+}
+
 function formatBillCycleDate(dateStr: string | null): string {
   if (!dateStr) return '—'
   try {
@@ -373,7 +400,7 @@ async function fetchHistory() {
   }
 }
 
-async function fetchRealtimeData() {
+async function fetchRealtimeData(forceRefresh: boolean = false) {
   realtimeLoading.value = true
   realtimeError.value = null
   try {
@@ -386,17 +413,17 @@ async function fetchRealtimeData() {
     
     if (!meterEnabled.value) {
       realtimeData.value = []
-      // Switch to a different default tab if realtime not available
       if (activeChartTab.value === 'realtime') {
         activeChartTab.value = 'billHistory'
       }
       return
     }
     
-    const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=24`)
+    // Use refresh=true to force fresh data from opower API
+    const refreshParam = forceRefresh ? '&refresh=true' : ''
+    const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=24${refreshParam}`)
     if (!res.ok) {
       if (res.status === 400) {
-        // Meter tracking not enabled - not an error
         meterEnabled.value = false
         realtimeData.value = []
         if (activeChartTab.value === 'realtime') {
@@ -407,9 +434,18 @@ async function fetchRealtimeData() {
       throw new Error(`HTTP ${res.status}`)
     }
     const data = await res.json()
-    realtimeData.value = data.readings || []
+    let readings = data.readings || []
     
-    // If no data returned, meter is enabled but no readings yet
+    // Filter to show only the last 24 hours from the most recent available reading
+    // (opower data is delayed, so we can't filter from "now")
+    if (readings.length > 0) {
+      const lastReadingTime = new Date(readings[readings.length - 1].end_time)
+      const cutoffTime = new Date(lastReadingTime.getTime() - 24 * 60 * 60 * 1000)
+      readings = readings.filter((r: RealtimeReading) => new Date(r.start_time) >= cutoffTime)
+    }
+    
+    realtimeData.value = readings
+    
     if (!realtimeData.value.length) {
       meterEnabled.value = false
       if (activeChartTab.value === 'realtime') {
@@ -418,7 +454,6 @@ async function fetchRealtimeData() {
       return
     }
     
-    // Create the realtime chart after data is loaded
     await nextTick()
     createRealtimeChart()
   } catch (e: any) {
@@ -428,6 +463,10 @@ async function fetchRealtimeData() {
   } finally {
     realtimeLoading.value = false
   }
+}
+
+async function refreshRealtimeData() {
+  await fetchRealtimeData(true)
 }
 
 function destroyRealtimeChart() {
@@ -1003,6 +1042,60 @@ onUnmounted(() => {
 .ha-realtime-wrapper {
   display: flex;
   flex-direction: column;
+}
+
+.ha-realtime-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.ha-realtime-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+}
+
+.ha-realtime-range {
+  font-weight: normal;
+  color: #6c757d;
+  font-size: 12px;
+}
+
+.ha-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: #0088cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.ha-refresh-btn:hover {
+  background: #006699;
+}
+
+.ha-refresh-btn:disabled {
+  background: #adb5bd;
+  cursor: not-allowed;
+}
+
+.ha-spin {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .ha-realtime-disclaimer {
