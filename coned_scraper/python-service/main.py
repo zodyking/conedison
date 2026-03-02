@@ -2399,15 +2399,34 @@ async def preview_tts_message():
     if isinstance(balance, (int, float)):
         balance = f"${balance:.2f}"
     
+    # Helper to format date as "Month Day" (no year) for TTS
+    def format_date_for_tts(date_str: str) -> str:
+        if not date_str:
+            return ""
+        try:
+            from dateutil import parser as date_parser
+            dt = date_parser.parse(date_str)
+            return dt.strftime("%B %d").replace(" 0", " ")  # "March 15" not "March 05"
+        except:
+            # Try to extract month/day from common formats
+            import re
+            # Match patterns like "Oct 08, 2025" or "10/08/2025" or "2025-10-08"
+            match = re.search(r'(\w{3,9})\s+(\d{1,2})', date_str)
+            if match:
+                return f"{match.group(1)} {int(match.group(2))}"
+            return date_str
+    
     # Get latest bill from ledger (this matches Account Ledger display)
     bills = ledger.get("bills", [])
     latest_bill = bills[0] if bills else {}
     
     # Get due_date from bill (now included via get_ledger_data)
-    due_date = latest_bill.get("due_date", "") or ""
+    due_date_raw = latest_bill.get("due_date", "") or ""
+    due_date = format_date_for_tts(due_date_raw)
     
     # Bill amount and period from ledger
     bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
+    bill_period = latest_bill.get("month_range", "")
     
     # Get kwh_used and kwh_cost from bill_details for the latest bill
     last_bill_kwh = ""
