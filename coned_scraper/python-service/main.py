@@ -79,8 +79,8 @@ DEFAULT_TTS_CONFIG = {
     "wait_for_idle": True,
     "tts_service": "tts.google_translate_say",
     "messages": {
-        "new_bill": "Your new Con Edison bill for {month_range} is now available.",
-        "payment_received": "Good news — your payment of {amount} has been received. Your account balance is now {balance}.",
+        "new_bill": "{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}.",
+        "payment_received": "{prefix} Your payment of {amount} has been received. Your account balance is now {balance}.",
     },
 }
 
@@ -2111,12 +2111,26 @@ async def preview_imap_emails():
 
 # ========== TTS Configuration ==========
 def load_tts_config() -> dict:
-    """Load TTS configuration"""
-    if not TTS_CONFIG_FILE.exists():
+    """Load TTS configuration from database (persists across reinstalls)"""
+    from database import get_tts_config_db, save_tts_config_db
+    
+    # Try database first
+    data = get_tts_config_db()
+    
+    # Migrate from JSON file if database is empty but file exists
+    if data is None and TTS_CONFIG_FILE.exists():
+        try:
+            data = json.loads(TTS_CONFIG_FILE.read_text())
+            save_tts_config_db(data)
+            add_log("info", "Migrated TTS config from JSON to database")
+        except:
+            pass
+    
+    if data is None:
         save_tts_config(DEFAULT_TTS_CONFIG.copy())
         return DEFAULT_TTS_CONFIG.copy()
+    
     try:
-        data = json.loads(TTS_CONFIG_FILE.read_text())
         merged = DEFAULT_TTS_CONFIG.copy()
         merged.update(data)
         merged.setdefault("tts_service", "tts.google_translate_say")
@@ -2134,8 +2148,14 @@ def load_tts_config() -> dict:
 
 
 def save_tts_config(config: dict):
-    """Save TTS configuration"""
-    TTS_CONFIG_FILE.write_text(json.dumps(config))
+    """Save TTS configuration to database"""
+    from database import save_tts_config_db
+    save_tts_config_db(config)
+    # Also write to file for backward compatibility
+    try:
+        TTS_CONFIG_FILE.write_text(json.dumps(config))
+    except:
+        pass
 
 
 class TTSConfigModel(BaseModel):

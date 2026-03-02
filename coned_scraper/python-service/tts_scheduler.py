@@ -29,7 +29,9 @@ class TTSScheduler:
         self._last_triggered: Dict[str, datetime] = {}
     
     def load_schedule_config(self) -> Dict[str, Any]:
-        """Load TTS schedule configuration."""
+        """Load TTS schedule configuration from database (persists across reinstalls)."""
+        from database import get_tts_schedule_db, save_tts_schedule_db
+        
         defaults = {
             "enabled": False,
             "hour_pattern": 3,  # Announce every N hours
@@ -37,28 +39,51 @@ class TTSScheduler:
             "start_time": "08:00",  # Active hours start
             "end_time": "21:00",  # Active hours end
             "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
-            "message_template": "{prefix} {greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
+            "message_template": "{prefix} {greeting}. Your Con Edison account balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
             "current_usage_sensor": "",  # HA sensor entity for current kWh usage
             "future_usage_sensor": "",  # HA sensor entity for projected kWh usage
             "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}
             "schedule_type": "daily",  # Legacy
             "updated_at": None
         }
-        if TTS_SCHEDULE_FILE.exists():
+        
+        # Try database first
+        data = get_tts_schedule_db()
+        
+        # Migrate from JSON file if database is empty but file exists
+        if data is None and TTS_SCHEDULE_FILE.exists():
             try:
                 data = json.loads(TTS_SCHEDULE_FILE.read_text())
-                return {**defaults, **data}
-            except Exception as e:
-                logger.error(f"Failed to load TTS schedule config: {e}")
+                save_tts_schedule_db(data)
+                logger.info("Migrated TTS schedule from JSON to database")
+            except:
+                pass
+        
+        if data:
+            return {**defaults, **data}
         return defaults
     
     def save_schedule_config(self, config: Dict[str, Any]):
-        """Save TTS schedule configuration."""
+        """Save TTS schedule configuration to database."""
+        from database import save_tts_schedule_db
+        
         config["updated_at"] = datetime.utcnow().isoformat() + "Z"
-        TTS_SCHEDULE_FILE.write_text(json.dumps(config, indent=2))
+        save_tts_schedule_db(config)
+        # Also write to file for backward compatibility
+        try:
+            TTS_SCHEDULE_FILE.write_text(json.dumps(config, indent=2))
+        except:
+            pass
     
     def load_tts_config(self) -> Dict[str, Any]:
-        """Load TTS configuration."""
+        """Load TTS configuration from database."""
+        from database import get_tts_config_db
+        
+        data = get_tts_config_db()
+        if data:
+            return data
+        
+        # Fall back to file
         if TTS_CONFIG_FILE.exists():
             try:
                 return json.loads(TTS_CONFIG_FILE.read_text())
@@ -181,16 +206,13 @@ class TTSScheduler:
             logger.warning("No TTS message generated")
             return
         
-        prefix = tts_config.get("prefix", "Message from Con Edison.")
-        full_message = f"{prefix}, {message}" if prefix else message
-        
         volume = tts_config.get("volume", 0.7)
         wait_for_idle = tts_config.get("wait_for_idle", True)
         tts_service = tts_config.get("tts_service", "tts.google_translate_say")
         
         try:
             success, err = await send_tts(
-                message=full_message,
+                message=message,
                 media_player=media_player,
                 volume=volume,
                 wait_for_idle=wait_for_idle,
@@ -375,7 +397,7 @@ def get_scheduler() -> TTSScheduler:
     return _scheduler
 
 
-async def trigger_new_bill_tts(bill_month_range: str, bill_total: str):
+async def trigger_new_bill_tts(bill_month_range: str, bill_total: str, due_date: str = ""):
     """Trigger TTS for a new bill."""
     scheduler = get_scheduler()
     tts_config = scheduler.load_tts_config()
@@ -389,21 +411,25 @@ async def trigger_new_bill_tts(bill_month_range: str, bill_total: str):
     
     template = tts_config.get("messages", {}).get("new_bill", "")
     if not template:
-        template = "Your new Con Edison bill for {month_range} is now available. The total is {bill_total}."
-    
-    try:
-        message = template.format(month_range=bill_month_range, bill_total=bill_total)
-    except KeyError:
-        message = template
+        template = "{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}."
     
     prefix = tts_config.get("prefix", "Message from Con Edison.")
-    full_message = f"{prefix}, {message}" if prefix else message
+    
+    try:
+        message = template.format(
+            prefix=prefix,
+            month_range=bill_month_range,
+            amount=bill_total,
+            due_date=due_date or "soon"
+        )
+    except KeyError:
+        message = template
     
     from ha_tts import send_tts
     
     try:
         await send_tts(
-            message=full_message,
+            message=message,
             media_player=media_player,
             volume=tts_config.get("volume", 0.7),
             wait_for_idle=tts_config.get("wait_for_idle", True),
@@ -428,21 +454,20 @@ async def trigger_payment_received_tts(amount: str, balance: str, payee_name: st
     
     template = tts_config.get("messages", {}).get("payment_received", "")
     if not template:
-        template = "Good news — your payment of {amount} has been received. Your account balance is now {balance}."
-    
-    try:
-        message = template.format(amount=amount, balance=balance, payee_name=payee_name)
-    except KeyError:
-        message = template
+        template = "{prefix} Your payment of {amount} has been received. Your account balance is now {balance}."
     
     prefix = tts_config.get("prefix", "Message from Con Edison.")
-    full_message = f"{prefix}, {message}" if prefix else message
+    
+    try:
+        message = template.format(prefix=prefix, amount=amount, balance=balance, payee_name=payee_name)
+    except KeyError:
+        message = template
     
     from ha_tts import send_tts
     
     try:
         await send_tts(
-            message=full_message,
+            message=message,
             media_player=media_player,
             volume=tts_config.get("volume", 0.7),
             wait_for_idle=tts_config.get("wait_for_idle", True),

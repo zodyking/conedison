@@ -217,6 +217,14 @@ def init_database():
         )
     ''')
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    ''')
+    
     # Create indexes for performance
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_bill_details_bill_id ON bill_details(bill_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_bills_cycle_date ON bills(bill_cycle_date)')
@@ -1911,6 +1919,67 @@ def get_scrape_history(limit: int = 50) -> List[Dict[str, Any]]:
         "failure_step": row["failure_step"],
         "duration_seconds": row["duration_seconds"]
     } for row in rows]
+
+
+# ==========================================
+# APP SETTINGS FUNCTIONS (persists across reinstalls)
+# ==========================================
+
+def get_app_setting(key: str) -> Optional[str]:
+    """Get a setting value from the database"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT value FROM app_settings WHERE key = ?', (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row['value'] if row else None
+
+
+def set_app_setting(key: str, value: str):
+    """Set a setting value in the database"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    timestamp = utc_now_iso()
+    cursor.execute('''
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    ''', (key, value, timestamp))
+    conn.commit()
+    conn.close()
+
+
+def get_tts_config_db() -> Optional[Dict[str, Any]]:
+    """Get TTS config from database"""
+    value = get_app_setting('tts_config')
+    if value:
+        try:
+            return json.loads(value)
+        except:
+            pass
+    return None
+
+
+def save_tts_config_db(config: Dict[str, Any]):
+    """Save TTS config to database"""
+    set_app_setting('tts_config', json.dumps(config))
+
+
+def get_tts_schedule_db() -> Optional[Dict[str, Any]]:
+    """Get TTS schedule from database"""
+    value = get_app_setting('tts_schedule')
+    if value:
+        try:
+            return json.loads(value)
+        except:
+            pass
+    return None
+
+
+def save_tts_schedule_db(config: Dict[str, Any]):
+    """Save TTS schedule to database"""
+    set_app_setting('tts_schedule', json.dumps(config))
+
 
 # Initialize database on import
 init_database()

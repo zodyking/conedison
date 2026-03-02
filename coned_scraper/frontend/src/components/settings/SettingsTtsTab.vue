@@ -105,6 +105,7 @@
               <div class="tts-form-group">
                 <label class="tts-label">New Bill Message</label>
                 <div class="tts-var-chips">
+                  <span class="tts-var-chip tts-var-chip-prefix" @click="insertVar('new_bill', '{prefix}')">{prefix}</span>
                   <span class="tts-var-chip" @click="insertVar('new_bill', '{month_range}')">{month_range}</span>
                   <span class="tts-var-chip" @click="insertVar('new_bill', '{amount}')">{amount}</span>
                   <span class="tts-var-chip" @click="insertVar('new_bill', '{due_date}')">{due_date}</span>
@@ -114,13 +115,14 @@
                   v-model="config.messages.new_bill"
                   class="tts-textarea"
                   rows="2"
-                  placeholder="Your new Con Edison bill for {month_range} is {amount}."
+                  placeholder="{prefix} Your new bill for {month_range} is {amount}."
                 ></textarea>
               </div>
 
               <div class="tts-form-group">
                 <label class="tts-label">Payment Received Message</label>
                 <div class="tts-var-chips">
+                  <span class="tts-var-chip tts-var-chip-prefix" @click="insertVar('payment_received', '{prefix}')">{prefix}</span>
                   <span class="tts-var-chip" @click="insertVar('payment_received', '{amount}')">{amount}</span>
                   <span class="tts-var-chip" @click="insertVar('payment_received', '{balance}')">{balance}</span>
                   <span class="tts-var-chip" @click="insertVar('payment_received', '{payee_name}')">{payee_name}</span>
@@ -130,7 +132,7 @@
                   v-model="config.messages.payment_received"
                   class="tts-textarea"
                   rows="2"
-                  placeholder="Payment of {amount} received. Balance is now {balance}."
+                  placeholder="{prefix} Payment of {amount} received. Balance is now {balance}."
                 ></textarea>
               </div>
             </div>
@@ -265,7 +267,6 @@
               <div class="tts-var-chips">
                 <span class="tts-var-chip tts-var-chip-prefix" @click="insertScheduleVar('{prefix}')">{prefix}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{greeting}')">{greeting}</span>
-                <span class="tts-var-chip" @click="insertScheduleVar('{time}')">{time}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{balance}')">{balance}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{latest_bill_amount}')">{latest_bill_amount}</span>
                 <span class="tts-var-chip" @click="insertScheduleVar('{due_date}')">{due_date}</span>
@@ -282,8 +283,8 @@
                 ref="scheduleMessageInput"
                 v-model="schedule.message_template"
                 class="tts-textarea tts-textarea-lg"
-                rows="4"
-                placeholder="{greeting}, the time is {time}. Your Con Edison balance is {balance}. Your latest bill for {latest_bill_period} is {latest_bill_amount}."
+                rows="5"
+                placeholder="{prefix} {greeting}. Your Con Edison balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}."
               ></textarea>
 
               <div class="tts-preview-section">
@@ -352,8 +353,8 @@ const config = reactive({
   wait_for_idle: true,
   prefix: 'Message from Con Edison.',
   messages: {
-    new_bill: 'Your new Con Edison bill for {month_range} is now available. The total is {amount}.',
-    payment_received: 'Good news! Your payment of {amount} has been received. Your account balance is now {balance}.',
+    new_bill: '{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}.',
+    payment_received: '{prefix} Your payment of {amount} has been received. Your account balance is now {balance}.',
   }
 })
 
@@ -364,7 +365,7 @@ const schedule = reactive({
   start_time: '08:00',
   end_time: '21:00',
   days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
-  message_template: '{prefix} {greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
+  message_template: '{prefix} {greeting}. Your Con Edison account balance is {balance}. Your most recent bill totaled {latest_bill_amount}, due {due_date}. You used {last_bill_kwh} last billing cycle. Current usage this month is {current_usage_kwh} at an estimated cost of {current_usage_cost}. Projected end-of-month usage is {projected_usage_kwh}, costing approximately {projected_usage_cost}. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
   current_usage_sensor: '',
   future_usage_sensor: ''
 })
@@ -442,7 +443,6 @@ async function generatePreview() {
       let msg = schedule.message_template || ''
       msg = msg.replace(/{prefix}/g, config.prefix || 'Message from Con Edison.')
       msg = msg.replace(/{greeting}/g, data.greeting || 'Good morning')
-      msg = msg.replace(/{time}/g, data.time || '')
       msg = msg.replace(/{balance}/g, data.balance ?? 'N/A')
       msg = msg.replace(/{latest_bill_amount}/g, data.latest_bill?.amount || 'N/A')
       msg = msg.replace(/{due_date}/g, data.latest_bill?.due_date || 'N/A')
@@ -767,10 +767,13 @@ onMounted(async () => {
 .tts-textarea {
   resize: vertical;
   min-height: 60px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .tts-textarea-lg {
-  min-height: 100px;
+  min-height: 120px;
+  width: 100%;
 }
 
 .tts-select {
