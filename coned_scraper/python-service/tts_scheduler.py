@@ -37,7 +37,8 @@ class TTSScheduler:
             "start_time": "08:00",  # Active hours start
             "end_time": "21:00",  # Active hours end
             "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
-            "message_template": "{greeting}, the time is {time}. Your Con Edison balance is {balance}. Your latest bill for {latest_bill_period} is {latest_bill_amount}.",
+            "message_template": "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount} and is due {due_date}. You used {kwh_used} of electricity this billing cycle. Your last payment of {last_payment_amount} was received on {last_payment_date}.",
+            "kwh_sensor": "",  # HA sensor entity for kWh usage
             "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}
             "schedule_type": "daily",  # Legacy
             "updated_at": None
@@ -204,15 +205,19 @@ class TTSScheduler:
     async def _build_bill_summary_message(self) -> str:
         """Build the bill summary TTS message using ledger data and message template."""
         try:
-            from database import get_ledger_data
+            from database import get_ledger_data, get_latest_bill_with_details
+            import aiohttp
+            import os
             
             schedule_config = self.load_schedule_config()
             template = schedule_config.get("message_template", "")
+            kwh_sensor = schedule_config.get("kwh_sensor", "")
             
             if not template:
-                template = "{greeting}, the time is {time}. Your Con Edison balance is {balance}."
+                template = "{greeting}. It is currently {time}. Your Con Edison account balance is {balance}."
             
             ledger = get_ledger_data()
+            bill_details = get_latest_bill_with_details()
             
             # Get current time info
             now = datetime.now()
@@ -236,39 +241,72 @@ class TTSScheduler:
             else:
                 time_str = f"{hour_12} {minute} {period}"
             
-            # Get bill and payment data
-            balance = ledger.get("account_balance", "N/A")
-            latest_bill = ledger.get("latest_bill", {})
-            latest_payment = ledger.get("latest_payment")
+            # Get balance from ledger
+            balance = ledger.get("account_balance") or ledger.get("total_balance", "")
+            if isinstance(balance, (int, float)):
+                balance = f"${balance:.2f}"
+            
+            # Get latest bill data from ledger
             bills = ledger.get("bills", [])
+            latest_bill = bills[0] if bills else {}
+            
+            bill_amount = latest_bill.get("amount", "") or latest_bill.get("bill_total", "")
+            bill_period = latest_bill.get("month_range", "")
+            
+            # Get due_date and kwh from bill_details table
+            due_date = ""
+            kwh_used = ""
+            
+            if bill_details:
+                due_date = bill_details.get("due_date", "") or ""
+                kwh_val = bill_details.get("kwh_used")
+                if kwh_val:
+                    kwh_used = f"{kwh_val} kWh"
+                if not bill_amount:
+                    bill_amount = bill_details.get("amount", "")
+                if not bill_period:
+                    bill_period = bill_details.get("month_range", "")
+            
+            # If kwh_sensor is configured, try to fetch from Home Assistant
+            if kwh_sensor and kwh_sensor.strip():
+                token = os.environ.get("SUPERVISOR_TOKEN")
+                if token:
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                f"http://supervisor/core/api/states/{kwh_sensor.strip()}",
+                                headers={"Authorization": f"Bearer {token}"},
+                            ) as resp:
+                                if resp.status == 200:
+                                    state_data = await resp.json()
+                                    sensor_state = state_data.get("state", "")
+                                    unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                                    if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                        kwh_used = f"{sensor_state} {unit}"
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch kWh sensor: {e}")
+            
+            # Get latest payment from ledger
+            latest_payment = ledger.get("latest_payment")
+            last_payment_amount = ""
+            last_payment_date = ""
+            
+            if latest_payment and isinstance(latest_payment, dict):
+                last_payment_amount = latest_payment.get("amount", "")
+                last_payment_date = latest_payment.get("payment_date", "")
             
             # Build placeholder values
             placeholders = {
                 "greeting": greeting,
                 "time": time_str,
                 "balance": balance or "N/A",
-                "latest_bill_amount": latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A"),
-                "latest_bill_period": latest_bill.get("month_range", "N/A"),
-                "due_date": "",
-                "last_payment_amount": "",
-                "last_payment_date": "",
-                "kwh_used": "",
+                "latest_bill_amount": bill_amount or "N/A",
+                "latest_bill_period": bill_period or "N/A",
+                "due_date": due_date or "N/A",
+                "last_payment_amount": last_payment_amount or "No payment",
+                "last_payment_date": last_payment_date or "N/A",
+                "kwh_used": kwh_used or "N/A",
             }
-            
-            # Try to get due date and kwh from bill details
-            if bills and len(bills) > 0:
-                first_bill = bills[0]
-                if isinstance(first_bill, dict):
-                    placeholders["due_date"] = first_bill.get("due_date", "N/A")
-                    placeholders["kwh_used"] = str(first_bill.get("kwh_used", "N/A"))
-            
-            # Payment info
-            if latest_payment and isinstance(latest_payment, dict):
-                placeholders["last_payment_amount"] = latest_payment.get("amount", "No payment")
-                placeholders["last_payment_date"] = latest_payment.get("payment_date", "")
-            else:
-                placeholders["last_payment_amount"] = "No payment"
-                placeholders["last_payment_date"] = ""
             
             # Replace placeholders in template
             message = template

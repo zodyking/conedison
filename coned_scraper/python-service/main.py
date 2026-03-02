@@ -2229,6 +2229,7 @@ class TTSScheduleModel(BaseModel):
     end_time: Optional[str] = None  # Active hours end "HH:MM"
     days_of_week: Optional[list] = None  # ["mon", "tue", ...]
     message_template: Optional[str] = None  # Custom message template with placeholders
+    kwh_sensor: Optional[str] = None  # HA sensor entity for kWh usage
     schedule_times: Optional[list] = None  # Legacy: List of TTSScheduleTimeModel dicts
     schedule_type: Optional[str] = None  # Legacy: "daily" or "specific_days"
 
@@ -2260,12 +2261,22 @@ async def save_tts_schedule_endpoint(config: TTSScheduleModel):
 async def trigger_bill_summary_tts():
     """Manually trigger a bill summary TTS"""
     from tts_scheduler import get_scheduler
-    scheduler = get_scheduler()
-    tts_config = scheduler.load_tts_config()
     
+    # Use main config loader to ensure consistency
+    tts_config = load_tts_config()
+
     if not tts_config.get("enabled"):
-        raise HTTPException(status_code=400, detail="TTS is not enabled")
+        raise HTTPException(status_code=400, detail="TTS is not enabled. Enable it in Event TTS Alerts.")
     
+    media_player = (tts_config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="No media player configured")
+    
+    tts_service = (tts_config.get("tts_service") or "").strip()
+    if not tts_service:
+        raise HTTPException(status_code=400, detail="No TTS entity configured")
+
+    scheduler = get_scheduler()
     await scheduler._send_scheduled_tts(tts_config)
     return {"success": True, "message": "Bill summary TTS triggered"}
 
@@ -2325,11 +2336,19 @@ async def get_ha_entities():
 
 @app.get("/api/tts/preview-message")
 async def preview_tts_message():
-    """Generate a preview of the scheduled TTS message"""
+    """Generate preview data for TTS message template variables"""
     from datetime import datetime
+    from database import get_latest_bill_with_details
+    from tts_scheduler import get_scheduler
     
     ledger = get_ledger_data()
     
+    # Get schedule config for kwh_sensor
+    scheduler = get_scheduler()
+    schedule_config = scheduler.load_schedule_config()
+    kwh_sensor = schedule_config.get("kwh_sensor", "")
+    
+    # Get time info
     now = datetime.now()
     hour = now.hour
     if 5 <= hour < 12:
@@ -2352,48 +2371,76 @@ async def preview_tts_message():
     else:
         time_str = f"{hour_12} {minute} {period}"
     
-    parts = [f"{greeting}, the time is {time_str}."]
+    # Get balance from ledger
+    balance = ledger.get("account_balance") or ledger.get("total_balance", "")
+    if isinstance(balance, (int, float)):
+        balance = f"${balance:.2f}"
     
-    tts_config = load_tts_config()
-    prefix = tts_config.get("prefix", "")
-    if prefix:
-        parts.append(prefix)
+    # Get latest bill with details (includes due_date, kwh_used from bill_details)
+    latest_bill_details = get_latest_bill_with_details()
     
-    balance = ledger.get("total_balance")
-    if balance is not None:
-        if isinstance(balance, str):
-            balance_str = balance
-        else:
-            balance_str = f"${abs(balance):.2f}"
-            if balance < 0:
-                balance_str = f"negative {balance_str}"
-        parts.append(f"Your current Con Edison balance is {balance_str}.")
+    # Get latest bill from ledger for month_range and amount
+    bills = ledger.get("bills", [])
+    latest_bill = bills[0] if bills else {}
     
-    latest_bill = ledger.get("bills", [{}])[0] if ledger.get("bills") else {}
-    if latest_bill:
-        month_range = latest_bill.get("month_range", "")
-        amount = latest_bill.get("amount", "")
-        if month_range and amount:
-            parts.append(f"Your latest bill for {month_range} is {amount}.")
+    # Merge data
+    bill_amount = latest_bill.get("amount", "") or latest_bill.get("bill_total", "")
+    bill_period = latest_bill.get("month_range", "")
+    due_date = ""
+    kwh_used = ""
     
+    if latest_bill_details:
+        due_date = latest_bill_details.get("due_date", "") or ""
+        kwh_val = latest_bill_details.get("kwh_used")
+        if kwh_val:
+            kwh_used = f"{kwh_val} kWh"
+        if not bill_amount:
+            bill_amount = latest_bill_details.get("amount", "")
+        if not bill_period:
+            bill_period = latest_bill_details.get("month_range", "")
+    
+    # If kwh_sensor is configured, try to fetch from Home Assistant
+    if kwh_sensor and kwh_sensor.strip():
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if token:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"http://supervisor/core/api/states/{kwh_sensor.strip()}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    ) as resp:
+                        if resp.status == 200:
+                            state_data = await resp.json()
+                            sensor_state = state_data.get("state", "")
+                            unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
+                            if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                kwh_used = f"{sensor_state} {unit}"
+            except Exception as e:
+                add_log("warning", f"Failed to fetch kWh sensor for preview: {e}")
+    
+    # Get latest payment from ledger
     latest_payment = ledger.get("latest_payment")
-    if latest_payment:
-        pay_amount = latest_payment.get("amount", "")
-        pay_date = latest_payment.get("payment_date", "")
-        if pay_amount:
-            parts.append(f"Your last payment of {pay_amount} was received{' on ' + pay_date if pay_date else ''}.")
-    else:
-        parts.append("No recent payments on record.")
+    last_payment_amount = ""
+    last_payment_date = ""
     
-    message = " ".join(parts)
+    if latest_payment and isinstance(latest_payment, dict):
+        last_payment_amount = latest_payment.get("amount", "")
+        last_payment_date = latest_payment.get("payment_date", "")
     
     return {
-        "message": message,
         "greeting": greeting,
         "time": time_str,
-        "balance": balance,
-        "latest_bill": latest_bill,
-        "latest_payment": latest_payment
+        "balance": balance or "N/A",
+        "latest_bill": {
+            "amount": bill_amount or "N/A",
+            "month_range": bill_period or "N/A",
+            "due_date": due_date or "N/A",
+            "kwh_used": kwh_used or "N/A"
+        },
+        "latest_payment": {
+            "amount": last_payment_amount or "No payment",
+            "payment_date": last_payment_date or ""
+        }
     }
 
 

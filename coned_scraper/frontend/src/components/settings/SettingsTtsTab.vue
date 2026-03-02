@@ -218,6 +218,18 @@
               </div>
             </div>
 
+            <!-- kWh Sensor Input -->
+            <div class="tts-form-group">
+              <label class="tts-label">kWh Sensor (Home Assistant Entity ID)</label>
+              <input
+                v-model="schedule.kwh_sensor"
+                type="text"
+                class="tts-input"
+                placeholder="sensor.conedison_kwh_used"
+              />
+              <p class="tts-hint">Optional: Enter a HA sensor entity to get real-time kWh data. Leave empty to use parsed bill data.</p>
+            </div>
+
             <!-- Schedule Message Builder -->
             <div class="tts-subsection">
               <h4 class="tts-subsection-title">Scheduled Message Template</h4>
@@ -320,7 +332,8 @@ const schedule = reactive({
   start_time: '08:00',
   end_time: '21:00',
   days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
-  message_template: '{greeting}, the time is {time}. Your Con Edison balance is {balance}. Your latest bill for {latest_bill_period} is {latest_bill_amount}.'
+  message_template: '{greeting}. It is currently {time}. Your Con Edison account balance is {balance}. Your most recent bill for {latest_bill_period} totaled {latest_bill_amount} and is due {due_date}. You used {kwh_used} of electricity this billing cycle. Your last payment of {last_payment_amount} was received on {last_payment_date}.',
+  kwh_sensor: ''
 })
 
 const expandedSections = reactive({
@@ -455,6 +468,7 @@ async function loadSchedule() {
       schedule.end_time = data.end_time ?? '21:00'
       schedule.days_of_week = data.days_of_week ?? ['mon', 'tue', 'wed', 'thu', 'fri']
       schedule.message_template = data.message_template ?? schedule.message_template
+      schedule.kwh_sensor = data.kwh_sensor ?? ''
     }
   } catch (e) {
     console.error('Failed to load schedule:', e)
@@ -504,7 +518,8 @@ async function saveSchedule() {
         start_time: schedule.start_time,
         end_time: schedule.end_time,
         days_of_week: schedule.days_of_week,
-        message_template: schedule.message_template
+        message_template: schedule.message_template,
+        kwh_sensor: schedule.kwh_sensor
       })
     })
     if (res.ok) {
