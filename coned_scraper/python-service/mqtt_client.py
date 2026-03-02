@@ -177,10 +177,10 @@ class MQTTClient:
         json_attrs = "{{ value_json.data | tojson }}"
         configs = [
             {
-                "topic": f"{dp}/sensor/coned_account_balance/config",
+                "topic": f"{dp}/sensor/ConEd_account_balance/config",
                 "payload": {
                     "name": "ConEd Account Balance",
-                    "unique_id": "coned_account_balance",
+                    "unique_id": "ConEd_account_balance",
                     "state_topic": f"{bt}/account_balance",
                     "unit_of_measurement": "USD",
                     "device_class": "monetary",
@@ -190,10 +190,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_latest_bill/config",
+                "topic": f"{dp}/sensor/ConEd_latest_bill/config",
                 "payload": {
                     "name": "ConEd Latest Bill",
-                    "unique_id": "coned_latest_bill",
+                    "unique_id": "ConEd_latest_bill",
                     "state_topic": f"{bt}/latest_bill",
                     "unit_of_measurement": "USD",
                     "device_class": "monetary",
@@ -203,10 +203,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_previous_bill/config",
+                "topic": f"{dp}/sensor/ConEd_previous_bill/config",
                 "payload": {
                     "name": "ConEd Previous Bill",
-                    "unique_id": "coned_previous_bill",
+                    "unique_id": "ConEd_previous_bill",
                     "state_topic": f"{bt}/previous_bill",
                     "unit_of_measurement": "USD",
                     "device_class": "monetary",
@@ -216,10 +216,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_last_payment/config",
+                "topic": f"{dp}/sensor/ConEd_last_payment/config",
                 "payload": {
                     "name": "ConEd Last Payment",
-                    "unique_id": "coned_last_payment",
+                    "unique_id": "ConEd_last_payment",
                     "state_topic": f"{bt}/last_payment",
                     "unit_of_measurement": "USD",
                     "device_class": "monetary",
@@ -229,10 +229,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_bill_pdf_url/config",
+                "topic": f"{dp}/sensor/ConEd_bill_pdf_url/config",
                 "payload": {
                     "name": "ConEd Bill PDF URL",
-                    "unique_id": "coned_bill_pdf_url",
+                    "unique_id": "ConEd_bill_pdf_url",
                     "state_topic": f"{bt}/bill_pdf_url",
                     "value_template": "{{ value }}",
                     "json_attributes_topic": f"{bt}/bill_pdf_url_json",
@@ -241,10 +241,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_payee_summary/config",
+                "topic": f"{dp}/sensor/ConEd_payee_summary/config",
                 "payload": {
                     "name": "ConEd Payee Summary",
-                    "unique_id": "coned_payee_summary",
+                    "unique_id": "ConEd_payee_summary",
                     "state_topic": f"{bt}/payee_summary",
                     "value_template": "{{ value_json.data.bill_balance | default(0) }}",
                     "device_class": "monetary",
@@ -255,10 +255,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_due_date/config",
+                "topic": f"{dp}/sensor/ConEd_due_date/config",
                 "payload": {
                     "name": "ConEd Due Date",
-                    "unique_id": "coned_due_date",
+                    "unique_id": "ConEd_due_date",
                     "state_topic": f"{bt}/due_date",
                     "value_template": "{{ value }}",
                     "icon": "mdi:calendar-clock",
@@ -268,10 +268,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_kwh_cost/config",
+                "topic": f"{dp}/sensor/ConEd_kwh_cost/config",
                 "payload": {
                     "name": "ConEd kWh Cost",
-                    "unique_id": "coned_kwh_cost",
+                    "unique_id": "ConEd_kwh_cost",
                     "state_topic": f"{bt}/kwh_cost",
                     "unit_of_measurement": "$/kWh",
                     "icon": "mdi:lightning-bolt",
@@ -281,10 +281,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_kwh_used/config",
+                "topic": f"{dp}/sensor/ConEd_kwh_used/config",
                 "payload": {
                     "name": "ConEd kWh Used",
-                    "unique_id": "coned_kwh_used",
+                    "unique_id": "ConEd_kwh_used",
                     "state_topic": f"{bt}/kwh_used",
                     "unit_of_measurement": "kWh",
                     "device_class": "energy",
@@ -295,10 +295,10 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_current_meter_usage/config",
+                "topic": f"{dp}/sensor/ConEd_current_meter_usage/config",
                 "payload": {
                     "name": "ConEd Current Meter Usage",
-                    "unique_id": "coned_current_meter_usage",
+                    "unique_id": "ConEd_current_meter_usage",
                     "state_topic": f"{bt}/current_meter_usage",
                     "unit_of_measurement": "kWh",
                     "device_class": "energy",
@@ -310,15 +310,70 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/coned_current_usage_cost/config",
+                "topic": f"{dp}/sensor/ConEd_current_usage_cost/config",
                 "payload": {
                     "name": "ConEd Current Usage Cost",
-                    "unique_id": "coned_current_usage_cost",
+                    "unique_id": "ConEd_current_usage_cost",
                     "state_topic": f"{bt}/current_usage_cost",
                     "unit_of_measurement": "USD",
                     "device_class": "monetary",
                     "icon": "mdi:currency-usd",
                     "json_attributes_topic": f"{bt}/current_usage_cost_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            # New forecast sensors
+            {
+                "topic": f"{dp}/sensor/ConEd_billing_start_date/config",
+                "payload": {
+                    "name": "ConEd Billing Start Date",
+                    "unique_id": "ConEd_billing_start_date",
+                    "state_topic": f"{bt}/billing_start_date",
+                    "value_template": "{{ value }}",
+                    "icon": "mdi:calendar-start",
+                    "json_attributes_topic": f"{bt}/billing_start_date_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/ConEd_billing_end_date/config",
+                "payload": {
+                    "name": "ConEd Billing End Date",
+                    "unique_id": "ConEd_billing_end_date",
+                    "state_topic": f"{bt}/billing_end_date",
+                    "value_template": "{{ value }}",
+                    "icon": "mdi:calendar-end",
+                    "json_attributes_topic": f"{bt}/billing_end_date_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/ConEd_usage_to_date/config",
+                "payload": {
+                    "name": "ConEd Usage To Date",
+                    "unique_id": "ConEd_usage_to_date",
+                    "state_topic": f"{bt}/usage_to_date",
+                    "unit_of_measurement": "kWh",
+                    "device_class": "energy",
+                    "icon": "mdi:flash-outline",
+                    "json_attributes_topic": f"{bt}/usage_to_date_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/ConEd_forecasted_usage/config",
+                "payload": {
+                    "name": "ConEd Forecasted Usage",
+                    "unique_id": "ConEd_forecasted_usage",
+                    "state_topic": f"{bt}/forecasted_usage",
+                    "unit_of_measurement": "kWh",
+                    "device_class": "energy",
+                    "icon": "mdi:chart-line",
+                    "json_attributes_topic": f"{bt}/forecasted_usage_json",
                     "json_attributes_template": json_attrs,
                     "device": device,
                 },
@@ -593,6 +648,72 @@ class MQTTClient:
         }
         await self.publish("current_usage_cost", cost_value, json_payload)
         logger.info(f"Published current usage cost: ${cost_value}")
+
+    async def publish_billing_start_date(self, start_date: Optional[str], timestamp: Optional[str] = None):
+        """Publish billing period start date"""
+        state = start_date or "Unknown"
+        json_payload = {
+            "event_type": "billing_start_date",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "billing_start_date": start_date,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("billing_start_date", state, json_payload)
+
+    async def publish_billing_end_date(self, end_date: Optional[str], timestamp: Optional[str] = None):
+        """Publish billing period end date"""
+        state = end_date or "Unknown"
+        json_payload = {
+            "event_type": "billing_end_date",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "billing_end_date": end_date,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("billing_end_date", state, json_payload)
+
+    async def publish_usage_to_date(self, usage: Optional[float], timestamp: Optional[str] = None):
+        """Publish kWh usage to date in current billing period"""
+        usage_value = round(usage, 2) if usage else 0
+        json_payload = {
+            "event_type": "usage_to_date",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "usage_to_date": usage_value,
+                "unit": "kWh",
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("usage_to_date", usage_value, json_payload)
+
+    async def publish_forecasted_usage(self, usage: Optional[float], timestamp: Optional[str] = None):
+        """Publish forecasted kWh usage for full billing period"""
+        usage_value = round(usage, 2) if usage else 0
+        json_payload = {
+            "event_type": "forecasted_usage",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "forecasted_usage": usage_value,
+                "unit": "kWh",
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("forecasted_usage", usage_value, json_payload)
+
+    async def publish_forecast_sensors(self, forecast_data: Dict[str, Any], timestamp: Optional[str] = None):
+        """Publish all forecast-related sensors from opower data"""
+        ts = timestamp or utc_now_iso()
+        if not forecast_data:
+            return
+        
+        await self.publish_billing_start_date(forecast_data.get("start_date"), ts)
+        await self.publish_billing_end_date(forecast_data.get("end_date"), ts)
+        await self.publish_usage_to_date(forecast_data.get("usage_to_date"), ts)
+        await self.publish_forecasted_usage(forecast_data.get("forecasted_usage"), ts)
+        logger.info(f"Published forecast sensors: usage_to_date={forecast_data.get('usage_to_date')}, forecasted={forecast_data.get('forecasted_usage')}")
 
     async def publish_bill_details_sensors(self, timestamp: Optional[str] = None):
         """Publish due_date, kwh_cost, kwh_used from latest bill details"""

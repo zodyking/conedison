@@ -34,6 +34,7 @@ class MeterService:
         self._polling_task: Optional[asyncio.Task] = None
         self._running = False
         self._opower = None
+        self._session = None
         self._accounts: List[Any] = []
     
     def is_configured(self) -> bool:
@@ -54,8 +55,7 @@ class MeterService:
     async def initialize(self, config: Dict[str, Any]) -> bool:
         """Initialize meter with configuration from database."""
         try:
-            from opower import Opower
-            from opower.utilities.coned import ConEd
+            from opower import Opower, create_cookie_jar
             
             self.config = config
             
@@ -72,15 +72,23 @@ class MeterService:
                 except Exception:
                     pass
             
-            # Initialize opower with ConEd utility
+            # Close existing session if any
+            if hasattr(self, '_session') and self._session:
+                await self._session.close()
+            
+            # Create session with opower's cookie jar (required for proper auth)
+            self._session = aiohttp.ClientSession(cookie_jar=create_cookie_jar())
+            
+            # Initialize opower with ConEd utility (pass utility name as string)
             self._opower = Opower(
-                session=aiohttp.ClientSession(),
-                utility=ConEd(totp_secret=config.get('totp_secret', '')),
+                session=self._session,
+                utility="coned",
                 username=config['email'],
                 password=password,
+                optional_totp_secret=config.get('totp_secret', ''),
             )
             
-            logger.info("Meter service initialized (opower/ConEd)")
+            logger.info("Meter service initialized (opower/ConEd with cookie_jar)")
             return True
             
         except ImportError as e:
@@ -213,6 +221,68 @@ class MeterService:
             logger.error(f"Failed to fetch forecast: {e}")
             return None
     
+    async def fetch_quarter_hour_reads(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """Fetch quarter-hour (15-minute) usage data for real-time chart.
+        
+        Args:
+            hours: Number of hours to fetch (default 24, max ~144 hours / 6 days)
+        
+        Returns:
+            List of readings with start_time, end_time, consumption
+        """
+        if not self.is_configured():
+            logger.error("Meter not configured")
+            return []
+        
+        try:
+            from opower import AggregateType
+            
+            # Login if needed
+            if not await self._login():
+                return []
+            
+            # Get accounts
+            accounts = await self._get_accounts()
+            if not accounts:
+                logger.error("No opower accounts found")
+                return []
+            
+            account = accounts[0]
+            
+            # Fetch quarter-hour data (limited to 6 days by opower)
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(hours=hours)
+            
+            reads = await self._opower.async_get_cost_reads(
+                account,
+                AggregateType.QUARTER_HOUR,
+                start_date,
+                end_date
+            )
+            
+            if not reads:
+                logger.warning("No quarter-hour readings available")
+                return []
+            
+            # Convert to dict format
+            result = [
+                {
+                    'start_time': r.start_time.isoformat() if r.start_time else None,
+                    'end_time': r.end_time.isoformat() if r.end_time else None,
+                    'consumption': float(r.consumption) if r.consumption is not None else 0,
+                }
+                for r in reads
+            ]
+            
+            logger.info(f"Fetched {len(result)} quarter-hour readings")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch quarter-hour reads: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
     async def get_account_info(self) -> Optional[Dict[str, Any]]:
         """Get account information including smart meter status."""
         if not self.is_configured():
@@ -301,9 +371,10 @@ class MeterService:
                 pass
             self._polling_task = None
         
-        # Close opower session
-        if self._opower and hasattr(self._opower, '_session') and self._opower._session:
-            await self._opower._session.close()
+        # Close session
+        if hasattr(self, '_session') and self._session:
+            await self._session.close()
+            self._session = None
         
         logger.info("Meter polling stopped")
     
@@ -333,6 +404,11 @@ class MeterService:
                 kwh_cost = float(latest_bill['kwh_cost'])
                 usage_cost = value * kwh_cost
                 await mqtt_client.publish_current_usage_cost(usage_cost, timestamp)
+            
+            # Also fetch and publish forecast data
+            forecast = await self.fetch_forecast()
+            if forecast:
+                await mqtt_client.publish_forecast_sensors(forecast, timestamp)
             
         except Exception as e:
             logger.error(f"Failed to publish meter reading to MQTT: {e}")

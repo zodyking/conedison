@@ -6,7 +6,7 @@
     </div>
     <div class="ha-card-content">
       <div class="info-text" style="margin-bottom: 1.5rem">
-        Configure MQTT to publish sensor data to Home Assistant. With <strong>MQTT Discovery</strong> enabled, sensors like <code>sensor.coned_latest_bill</code> and <code>sensor.coned_account_balance</code> are auto-registered—no manual configuration.yaml needed.
+        Configure MQTT to publish sensor data to Home Assistant. With <strong>MQTT Discovery</strong> enabled, sensors like <code>sensor.ConEd_latest_bill</code> and <code>sensor.ConEd_account_balance</code> are auto-registered—no manual configuration.yaml needed.
       </div>
       <form @submit.prevent="handleSave">
         <div class="ha-form-group">
@@ -47,7 +47,7 @@
             <input v-model="mqttDiscovery" type="checkbox" />
             <span>MQTT Discovery (auto-register sensors)</span>
           </label>
-          <div class="info-text">Publish discovery configs so Home Assistant creates sensors (e.g. sensor.coned_latest_bill) automatically</div>
+          <div class="info-text">Publish discovery configs so Home Assistant creates sensors (e.g. sensor.ConEd_latest_bill) automatically</div>
         </div>
         <button type="submit" class="ha-button ha-button-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save MQTT Config' }}</button>
       </form>

@@ -2536,6 +2536,44 @@ async def refresh_meter_reading():
     }
 
 
+@app.get("/api/meter-reading/realtime")
+async def get_realtime_usage(hours: int = 24):
+    """Get quarter-hour (15-minute) usage data for real-time chart.
+    
+    Args:
+        hours: Number of hours to fetch (default 24, max 144 / 6 days)
+    
+    Returns:
+        List of readings with start_time, end_time, consumption
+    """
+    from meter_service import get_meter_service
+    
+    service = get_meter_service()
+    
+    if not service.is_enabled():
+        raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
+    
+    # Clamp hours to max 144 (6 days of quarter-hour data)
+    hours = min(max(1, hours), 144)
+    
+    readings = await service.fetch_quarter_hour_reads(hours)
+    
+    if not readings:
+        return {
+            "success": True,
+            "readings": [],
+            "hours": hours,
+            "message": "No quarter-hour data available"
+        }
+    
+    return {
+        "success": True,
+        "readings": readings,
+        "hours": hours,
+        "count": len(readings)
+    }
+
+
 # ========== TTS Configuration ==========
 def load_tts_config() -> dict:
     """Load TTS configuration from database (persists across reinstalls)"""

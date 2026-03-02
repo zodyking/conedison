@@ -52,26 +52,31 @@
         </div>
       </div>
 
-      <!-- Bill Total Chart (Primary - Always Visible) -->
-      <div class="ha-chart-card ha-chart-primary">
-        <div class="ha-chart-header">
-          <span class="ha-chart-icon">💰</span>
-          <span>Bill Totals Over Time</span>
-        </div>
-        <div class="ha-chart-container">
-          <canvas ref="billChart"></canvas>
-        </div>
-      </div>
-
       <!-- Tabbed Charts Section -->
       <div class="ha-chart-card ha-chart-tabs-card">
         <div class="ha-chart-tabs">
           <button 
             class="ha-chart-tab" 
+            :class="{ active: activeChartTab === 'realtime' }"
+            @click="activeChartTab = 'realtime'"
+          >
+            <span class="ha-tab-icon">⚡</span>
+            <span class="ha-tab-label">Real Time Usage (Last 24 Hours)</span>
+          </button>
+          <button 
+            class="ha-chart-tab" 
+            :class="{ active: activeChartTab === 'billHistory' }"
+            @click="activeChartTab = 'billHistory'"
+          >
+            <span class="ha-tab-icon">💰</span>
+            <span class="ha-tab-label">Bill History</span>
+          </button>
+          <button 
+            class="ha-chart-tab" 
             :class="{ active: activeChartTab === 'kwh' }"
             @click="activeChartTab = 'kwh'"
           >
-            <span class="ha-tab-icon">⚡</span>
+            <span class="ha-tab-icon">📈</span>
             <span class="ha-tab-label">kWh Usage</span>
           </button>
           <button 
@@ -93,6 +98,27 @@
         </div>
         
         <div class="ha-chart-tab-content">
+          <!-- Real Time Usage Chart (Last 24 Hours) -->
+          <div v-show="activeChartTab === 'realtime'" class="ha-chart-container">
+            <div v-if="realtimeLoading" class="ha-realtime-loading">
+              <div class="ha-loading-spinner small"></div>
+              <span>Loading real-time data...</span>
+            </div>
+            <div v-else-if="realtimeError" class="ha-realtime-error">
+              {{ realtimeError }}
+            </div>
+            <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
+              <p>No real-time usage data available.</p>
+              <p class="ha-realtime-hint">Enable Meter Tracking in Settings to view quarter-hour usage data.</p>
+            </div>
+            <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
+          </div>
+          
+          <!-- Bill History Chart -->
+          <div v-show="activeChartTab === 'billHistory'" class="ha-chart-container">
+            <canvas ref="billChart"></canvas>
+          </div>
+          
           <!-- kWh Usage Chart -->
           <div v-show="activeChartTab === 'kwh'" class="ha-chart-container">
             <canvas ref="kwhChart"></canvas>
@@ -201,17 +227,30 @@ interface HistoryRow {
   delivery_rate: number
 }
 
+interface RealtimeReading {
+  start_time: string
+  end_time: string
+  consumption: number
+}
+
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const historyData = ref<HistoryRow[]>([])
-const activeChartTab = ref<'kwh' | 'cost' | 'rates'>('kwh')
+const activeChartTab = ref<'realtime' | 'billHistory' | 'kwh' | 'cost' | 'rates'>('realtime')
 
+// Realtime data state
+const realtimeData = ref<RealtimeReading[]>([])
+const realtimeLoading = ref(false)
+const realtimeError = ref<string | null>(null)
+
+const realtimeChart = ref<HTMLCanvasElement | null>(null)
 const kwhChart = ref<HTMLCanvasElement | null>(null)
 const billChart = ref<HTMLCanvasElement | null>(null)
 const kwhCostChart = ref<HTMLCanvasElement | null>(null)
 const supplyDeliveryChart = ref<HTMLCanvasElement | null>(null)
 
 let chartInstances: Chart[] = []
+let realtimeChartInstance: Chart | null = null
 
 const averageKwh = computed(() => {
   const vals = historyData.value.filter(r => r.kwh_used).map(r => r.kwh_used!)
@@ -319,9 +358,129 @@ async function fetchHistory() {
   }
 }
 
+async function fetchRealtimeData() {
+  realtimeLoading.value = true
+  realtimeError.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=24`)
+    if (!res.ok) {
+      if (res.status === 400) {
+        // Meter tracking not enabled - not an error
+        realtimeData.value = []
+        return
+      }
+      throw new Error(`HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    realtimeData.value = data.readings || []
+    
+    // Create the realtime chart after data is loaded
+    await nextTick()
+    createRealtimeChart()
+  } catch (e: any) {
+    realtimeError.value = e.message || 'Failed to load real-time data'
+    realtimeData.value = []
+  } finally {
+    realtimeLoading.value = false
+  }
+}
+
+function destroyRealtimeChart() {
+  if (realtimeChartInstance) {
+    realtimeChartInstance.destroy()
+    realtimeChartInstance = null
+  }
+}
+
+function createRealtimeChart() {
+  destroyRealtimeChart()
+  
+  if (!realtimeChart.value || !realtimeData.value.length) return
+  
+  const ctx = realtimeChart.value.getContext('2d')
+  if (!ctx) return
+  
+  // Filter to last 24 hours and format data
+  const now = new Date()
+  const last24Hours = realtimeData.value.filter(r => {
+    const endTime = new Date(r.end_time)
+    return (now.getTime() - endTime.getTime()) <= 24 * 60 * 60 * 1000
+  })
+  
+  // Format labels as time (e.g., "2:30 PM")
+  const labels = last24Hours.map(r => {
+    const date = new Date(r.end_time)
+    return date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    })
+  })
+  
+  const consumption = last24Hours.map(r => r.consumption)
+  
+  realtimeChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Usage (kWh)',
+        data: consumption,
+        borderColor: 'rgba(0, 136, 204, 1)',
+        backgroundColor: 'rgba(0, 136, 204, 0.15)',
+        fill: true,
+        tension: 0.2,
+        pointRadius: 2,
+        pointBackgroundColor: 'rgba(0, 136, 204, 1)',
+        pointHoverRadius: 5
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        intersect: false,
+        mode: 'index'
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              if (items.length && last24Hours[items[0].dataIndex]) {
+                const r = last24Hours[items[0].dataIndex]
+                const start = new Date(r.start_time)
+                const end = new Date(r.end_time)
+                return `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+              }
+              return ''
+            },
+            label: (ctx) => `${ctx.parsed.y.toFixed(3)} kWh`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'kWh (15-min interval)' }
+        },
+        x: {
+          title: { display: true, text: 'Time' },
+          ticks: {
+            maxTicksLimit: 12,
+            maxRotation: 45,
+            minRotation: 0
+          }
+        }
+      }
+    }
+  })
+}
+
 function destroyCharts() {
   chartInstances.forEach(c => c.destroy())
   chartInstances = []
+  destroyRealtimeChart()
 }
 
 function createCharts() {
@@ -535,8 +694,19 @@ watch(historyData, async () => {
   }
 })
 
+watch(activeChartTab, async (newTab) => {
+  await nextTick()
+  if (newTab === 'realtime' && realtimeData.value.length && !realtimeChartInstance) {
+    createRealtimeChart()
+  }
+})
+
 onMounted(async () => {
-  await fetchHistory()
+  // Fetch both history and realtime data in parallel
+  await Promise.all([
+    fetchHistory(),
+    fetchRealtimeData()
+  ])
 })
 
 onUnmounted(() => {
@@ -778,6 +948,44 @@ onUnmounted(() => {
 .ha-total-cell {
   font-weight: 600;
   color: var(--ha-primary-text-color, #333);
+}
+
+/* Realtime chart states */
+.ha-realtime-loading,
+.ha-realtime-error,
+.ha-realtime-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: var(--ha-secondary-text-color, #666);
+  text-align: center;
+  padding: 24px;
+}
+
+.ha-realtime-loading {
+  gap: 12px;
+}
+
+.ha-loading-spinner.small {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+}
+
+.ha-realtime-error {
+  color: var(--ha-error-color, #dc3545);
+}
+
+.ha-realtime-empty p {
+  margin: 4px 0;
+}
+
+.ha-realtime-hint {
+  font-size: 12px;
+  color: var(--ha-tertiary-text-color, #999);
 }
 
 @media (max-width: 600px) {
