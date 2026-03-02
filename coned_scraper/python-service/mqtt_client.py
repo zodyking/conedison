@@ -410,14 +410,18 @@ class MQTTClient:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._publish_discovery_sync)
     
-    def _get_discovery_topics(self) -> list:
-        """Get list of all discovery topics for cleanup.
+    def _get_cleanup_topics(self) -> list:
+        """Get list of topics to clean up (duplicates and legacy names only).
         
-        Includes current names, old names, and common variations to ensure
-        thorough cleanup of any orphaned or duplicate sensors.
+        Does NOT include base current sensor names - only cleans:
+        - Duplicate suffixes (_2, _3, _4, _5)
+        - Old/renamed sensor names
+        - Legacy names without ConEd_ prefix
         """
         dp = self.DISCOVERY_PREFIX
-        base_sensors = [
+        
+        # Current active sensor names (DO NOT clean these)
+        active_sensors = [
             "ConEd_account_balance",
             "ConEd_latest_bill",
             "ConEd_previous_bill",
@@ -433,10 +437,16 @@ class MQTTClient:
             "ConEd_billing_end_date",
             "ConEd_current_cycle_usage",
             "ConEd_forecasted_usage",
-            # Old sensor names for migration
+        ]
+        
+        # Old/renamed sensor names to clean up
+        old_sensors = [
             "ConEd_kwh_used",
             "ConEd_usage_to_date",
-            # Legacy names without ConEd prefix
+        ]
+        
+        # Legacy names without ConEd prefix
+        legacy_sensors = [
             "coned_account_balance",
             "coned_latest_bill",
             "coned_previous_bill",
@@ -451,30 +461,54 @@ class MQTTClient:
         ]
         
         topics = []
-        for sensor in base_sensors:
+        
+        # Clean duplicate suffixes for active sensors (_2, _3, _4, _5)
+        for sensor in active_sensors:
+            for i in range(2, 6):
+                topics.append(f"{dp}/sensor/{sensor}_{i}/config")
+        
+        # Clean old sensor names (base and duplicates)
+        for sensor in old_sensors:
             topics.append(f"{dp}/sensor/{sensor}/config")
-            # Also try with _2, _3 suffixes that HA creates for duplicates
+            for i in range(2, 6):
+                topics.append(f"{dp}/sensor/{sensor}_{i}/config")
+        
+        # Clean legacy names (base and duplicates)
+        for sensor in legacy_sensors:
+            topics.append(f"{dp}/sensor/{sensor}/config")
             for i in range(2, 6):
                 topics.append(f"{dp}/sensor/{sensor}_{i}/config")
         
         return topics
     
     def cleanup_discovery_sync(self):
-        """Remove all MQTT discovery messages by publishing empty retained messages."""
+        """Remove duplicate and legacy MQTT discovery messages, then re-register sensors.
+        
+        Only cleans up:
+        - Duplicate suffixes (_2, _3, _4, _5)
+        - Old/renamed sensor names
+        - Legacy names without ConEd_ prefix
+        
+        Then re-publishes discovery for current sensors.
+        """
         if not self.enabled or not self.client or not self.connected:
             return
         
-        topics = self._get_discovery_topics()
+        topics = self._get_cleanup_topics()
         try:
             for topic in topics:
                 self.client.publish(topic, "", qos=self.qos, retain=True)
                 logger.info(f"MQTT discovery removed: {topic}")
             logger.info(f"MQTT discovery cleanup completed: {len(topics)} topics cleared")
+            
+            # Re-publish discovery for current sensors
+            self._discovery_published = False
+            self._publish_discovery_sync()
         except Exception as e:
             logger.warning(f"MQTT discovery cleanup failed: {e}")
     
     async def cleanup_discovery(self):
-        """Remove all MQTT discovery messages (async wrapper)."""
+        """Remove duplicate/legacy MQTT discovery messages and re-register sensors (async wrapper)."""
         if not self.enabled:
             return
         if not await self.ensure_connected():
