@@ -2544,6 +2544,10 @@ async def preview_tts_message(
         last_payment_amount = latest_payment.get("amount", "")
         last_payment_date = latest_payment.get("payment_date", "")
     
+    # Log final values before returning
+    add_log("debug", f"TTS Preview final: current_usage_kwh='{current_usage_kwh}', current_usage_cost='{current_usage_cost}'")
+    add_log("debug", f"TTS Preview final: projected_usage_kwh='{projected_usage_kwh}', projected_usage_cost='{projected_usage_cost}'")
+    
     return {
         "greeting": greeting,
         "time": time_str,
@@ -2565,6 +2569,13 @@ async def preview_tts_message(
         "projected_usage": {
             "kwh": projected_usage_kwh or "N/A",
             "cost": projected_usage_cost or "N/A"
+        },
+        "_debug": {
+            "sensors_requested": {
+                "current": current_usage_sensor,
+                "future": future_usage_sensor
+            },
+            "token_available": bool(token)
         }
     }
 

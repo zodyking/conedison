@@ -759,6 +759,7 @@ onUnmounted(() => {
   padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid var(--ha-border-color, #e0e0e0);
+  white-space: nowrap;
 }
 
 .ha-history-table th {

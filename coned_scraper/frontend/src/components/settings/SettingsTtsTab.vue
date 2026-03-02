@@ -447,6 +447,10 @@ async function generatePreview() {
     const res = await fetch(url)
     if (res.ok) {
       const data = await res.json()
+      console.log('TTS Preview response:', JSON.stringify(data, null, 2))
+      console.log('Debug info:', data._debug)
+      console.log('Current usage:', data.current_usage)
+      console.log('Projected usage:', data.projected_usage)
       let msg = schedule.message_template || ''
       msg = msg.replace(/{prefix}/g, config.prefix || 'Message from Con Edison.')
       msg = msg.replace(/{balance}/g, data.balance ?? 'N/A')
