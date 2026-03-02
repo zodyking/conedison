@@ -113,7 +113,8 @@
                 <th>Supply Rate</th>
                 <th>Delivery</th>
                 <th>Delivery Rate</th>
-                <th>Total</th>
+                <th>Cycle Total</th>
+                <th>Bill Total</th>
               </tr>
             </thead>
             <tbody>
@@ -125,7 +126,8 @@
                 <td>{{ row.supply_rate ? `$${row.supply_rate.toFixed(4)}` : '—' }}</td>
                 <td>{{ row.delivery_total ? `$${row.delivery_total.toFixed(2)}` : '—' }}</td>
                 <td>{{ row.delivery_rate ? `$${row.delivery_rate.toFixed(4)}` : '—' }}</td>
-                <td class="ha-total-cell">{{ row.electricity_total ? `$${row.electricity_total.toFixed(2)}` : (row.bill_total || '—') }}</td>
+                <td>{{ row.total_from_billing_period ? `$${row.total_from_billing_period.toFixed(2)}` : (row.electricity_total ? `$${row.electricity_total.toFixed(2)}` : '—') }}</td>
+                <td class="ha-total-cell">{{ formatBillTotal(row) }}</td>
               </tr>
             </tbody>
           </table>
@@ -220,6 +222,15 @@ const averageBill = computed(() => {
 function formatNumber(val: number | null | undefined): string {
   if (val == null) return '—'
   return val.toLocaleString()
+}
+
+function formatBillTotal(row: HistoryRow): string {
+  // Bill Total = Cycle Total + Previous Balance
+  const cycleTotal = row.total_from_billing_period || row.electricity_total || row.amount_numeric || 0
+  const prevBalance = row.balance_from_previous_bill || 0
+  const billTotal = cycleTotal + prevBalance
+  if (billTotal === 0) return '—'
+  return `$${billTotal.toFixed(2)}`
 }
 
 function formatBillCycleDate(dateStr: string | null): string {

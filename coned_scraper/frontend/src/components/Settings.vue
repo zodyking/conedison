@@ -37,17 +37,17 @@
             </div>
           </form>
 
-          <!-- Admin Reset Link (only for admin users) -->
+          <!-- Admin Reset Link (only for HA addon users) -->
           <div v-if="isHaAdmin && !showAdminReset" class="ha-admin-reset-link">
             <button type="button" class="ha-link-btn" @click="showAdminReset = true">
-              🔑 Forgot PIN? Reset as Admin
+              🔑 Forgot PIN? Reset
             </button>
           </div>
 
           <!-- Admin Password Reset Form -->
           <div v-if="showAdminReset" class="ha-admin-reset-form">
-            <h3 class="ha-reset-title">🔑 Admin Password Reset</h3>
-            <p class="ha-reset-desc">As an admin user, you can set a new PIN.</p>
+            <h3 class="ha-reset-title">🔑 Reset PIN</h3>
+            <p class="ha-reset-desc">Set a new 4-digit PIN for settings access.</p>
             <div class="ha-form-group">
               <label class="ha-form-label">New 4-digit PIN</label>
               <div class="ha-pin-row">
@@ -462,6 +462,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+.ha-settings-subpage > .ha-card {
+  flex-shrink: 0;
 }
 
 /* Admin Reset Styles */

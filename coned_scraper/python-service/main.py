@@ -982,75 +982,48 @@ async def get_admin_users_endpoint():
 
 @app.get("/api/app-settings/check-ha-admin")
 async def check_ha_admin(request: Request):
-    """Check if current HA user is admin (username is 'admin' or 'Admin')"""
-    # Get HA username from ingress headers
-    ha_user = request.headers.get("X-Ha-Access") or request.headers.get("X-Ingress-User") or ""
-    
-    # Also check X-Forwarded-For-User or other common headers
-    if not ha_user:
-        ha_user = request.headers.get("X-Remote-User") or ""
-    
-    # Check Supervisor API for current user info
+    """Check if current user can reset PIN (running in HA addon mode with supervisor access)"""
+    # In HA addon mode, check for supervisor token which means we're running as an addon
+    # The HA ingress authentication already ensures only authorized users can access the addon
     token = os.environ.get("SUPERVISOR_TOKEN")
-    if token and not ha_user:
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "http://supervisor/ingress/validate_session",
-                    headers={"Authorization": f"Bearer {token}"},
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        ha_user = data.get("data", {}).get("username", "")
-        except:
-            pass
     
-    is_admin = ha_user.lower() == "admin"
-    return {"is_admin": is_admin, "username": ha_user}
+    # Also try to get username from ingress headers
+    ha_user = request.headers.get("X-Ingress-Path", "")
+    
+    # If we have a supervisor token, user has addon access = can reset
+    # This is secure because HA ingress already authenticates the user
+    is_admin = bool(token)
+    
+    return {"is_admin": is_admin, "username": ha_user or "addon-user"}
 
 class HaAdminResetPasswordModel(BaseModel):
     new_password: str
 
 @app.post("/api/app-settings/ha-admin-reset-password")
 async def ha_admin_reset_password(data: HaAdminResetPasswordModel, request: Request):
-    """Reset settings password (for HA admin users only)"""
-    # Get HA username from request
-    ha_user = request.headers.get("X-Ha-Access") or request.headers.get("X-Ingress-User") or ""
-    if not ha_user:
-        ha_user = request.headers.get("X-Remote-User") or ""
-    
-    # Try supervisor API
+    """Reset settings password (for authenticated HA addon users)"""
+    # In HA addon mode, the supervisor token indicates we're running as an addon
+    # HA ingress already authenticates users, so if they can access this endpoint, they're authorized
     token = os.environ.get("SUPERVISOR_TOKEN")
-    if token and not ha_user:
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "http://supervisor/ingress/validate_session",
-                    headers={"Authorization": f"Bearer {token}"},
-                ) as resp:
-                    if resp.status == 200:
-                        resp_data = await resp.json()
-                        ha_user = resp_data.get("data", {}).get("username", "")
+    
+    if not token:
+        raise HTTPException(status_code=403, detail="PIN reset only available in Home Assistant addon mode")
         except:
             pass
     
     if ha_user.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Only HA admin users can reset the password")
-    
     if len(data.new_password) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+        raise HTTPException(status_code=400, detail="PIN must be at least 4 characters")
     
     try:
         settings = load_app_settings()
         settings['settings_password'] = data.new_password
         save_app_settings(settings)
-        add_log("info", f"Settings password reset by HA admin user '{ha_user}'")
-        return {"success": True, "message": "Password reset successfully"}
+        add_log("info", "Settings PIN reset via HA addon")
+        return {"success": True, "message": "PIN reset successfully"}
     except Exception as e:
-        add_log("error", f"Failed to reset password: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to reset password")
+        add_log("error", f"Failed to reset PIN: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to reset PIN")
 
 @app.get("/api/logs")
 async def get_logs_endpoint(limit: int = 100):
