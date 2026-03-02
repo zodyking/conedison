@@ -294,6 +294,35 @@ class MQTTClient:
                     "device": device,
                 },
             },
+            {
+                "topic": f"{dp}/sensor/coned_current_meter_usage/config",
+                "payload": {
+                    "name": "ConEd Current Meter Usage",
+                    "unique_id": "coned_current_meter_usage",
+                    "state_topic": f"{bt}/current_meter_usage",
+                    "unit_of_measurement": "kWh",
+                    "device_class": "energy",
+                    "state_class": "total_increasing",
+                    "icon": "mdi:gauge",
+                    "json_attributes_topic": f"{bt}/current_meter_usage_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_current_usage_cost/config",
+                "payload": {
+                    "name": "ConEd Current Usage Cost",
+                    "unique_id": "coned_current_usage_cost",
+                    "state_topic": f"{bt}/current_usage_cost",
+                    "unit_of_measurement": "USD",
+                    "device_class": "monetary",
+                    "icon": "mdi:currency-usd",
+                    "json_attributes_topic": f"{bt}/current_usage_cost_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
         ]
         try:
             for cfg in configs:
@@ -534,6 +563,36 @@ class MQTTClient:
             }
         }
         await self.publish("kwh_used", usage_value, json_payload)
+
+    async def publish_current_meter_usage(self, value: float, unit: str = "kWh", timestamp: Optional[str] = None):
+        """Publish current meter reading from real-time meter tracking"""
+        usage_value = round(value, 2) if value else 0
+        json_payload = {
+            "event_type": "current_meter_usage",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "value": usage_value,
+                "unit": unit,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("current_meter_usage", usage_value, json_payload)
+        logger.info(f"Published current meter usage: {usage_value} {unit}")
+
+    async def publish_current_usage_cost(self, cost: float, timestamp: Optional[str] = None):
+        """Publish calculated cost for current meter usage"""
+        cost_value = round(cost, 2) if cost else 0
+        json_payload = {
+            "event_type": "current_usage_cost",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "cost": cost_value,
+                "currency": "USD",
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        await self.publish("current_usage_cost", cost_value, json_payload)
+        logger.info(f"Published current usage cost: ${cost_value}")
 
     async def publish_bill_details_sensors(self, timestamp: Optional[str] = None):
         """Publish due_date, kwh_cost, kwh_used from latest bill details"""

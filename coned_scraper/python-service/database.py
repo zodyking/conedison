@@ -2007,6 +2007,38 @@ def save_tts_schedule_db(config: Dict[str, Any]):
     set_app_setting('tts_schedule', json.dumps(config))
 
 
+def get_meter_config_db() -> Optional[Dict[str, Any]]:
+    """Get meter tracking config from database"""
+    value = get_app_setting('meter_config')
+    if value:
+        try:
+            return json.loads(value)
+        except:
+            pass
+    return None
+
+
+def save_meter_config_db(config: Dict[str, Any]):
+    """Save meter tracking config to database"""
+    set_app_setting('meter_config', json.dumps(config))
+
+
+def get_meter_reading_db() -> Optional[Dict[str, Any]]:
+    """Get cached meter reading from database"""
+    value = get_app_setting('meter_reading')
+    if value:
+        try:
+            return json.loads(value)
+        except:
+            pass
+    return None
+
+
+def save_meter_reading_db(reading: Dict[str, Any]):
+    """Save meter reading to database (cache)"""
+    set_app_setting('meter_reading', json.dumps(reading))
+
+
 # Initialize database on import
 init_database()
 migrate_legacy_pdf()  # Migrate legacy latest_bill.pdf to bill_documents

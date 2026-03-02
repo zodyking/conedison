@@ -64,6 +64,17 @@
               <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
             </div>
           </div>
+          <!-- Meter Tracking Row -->
+          <div class="ha-summary-row ha-summary-row-two" v-if="meterData?.enabled && meterData?.reading">
+            <div class="ha-summary-box ha-meter-box">
+              <div class="ha-summary-label">Current Meter Usage</div>
+              <div class="ha-summary-value ha-meter-text">{{ meterData.reading.value ?? '—' }} {{ meterData.reading.unit || 'kWh' }}</div>
+            </div>
+            <div class="ha-summary-box ha-cost-box">
+              <div class="ha-summary-label">Current Usage Cost</div>
+              <div class="ha-summary-value ha-cost-text">${{ meterData.cost?.toFixed(2) || '—' }}</div>
+            </div>
+          </div>
           <div class="ha-summary-actions">
             <button
               class="ha-summary-btn"
@@ -316,6 +327,18 @@ const billSummaries = ref<Record<number, any>>({})
 const expandedBills = ref<Set<number>>(new Set())
 const expandedPayments = ref<Set<number>>(new Set())
 
+// Meter tracking state
+interface MeterReadingData {
+  enabled: boolean
+  reading: {
+    value: number | null
+    unit: string
+    fetched_at: string
+  } | null
+  cost: number | null
+}
+const meterData = ref<MeterReadingData | null>(null)
+
 function toggleBillExpanded(billId: number) {
   if (expandedBills.value.has(billId)) {
     expandedBills.value.delete(billId)
@@ -411,6 +434,18 @@ async function checkPdfExists() {
   }
 }
 
+async function loadMeterData() {
+  try {
+    const res = await fetch(`${getApiBase()}/meter-reading`)
+    if (res.ok) {
+      const data = await res.json()
+      meterData.value = data
+    }
+  } catch {
+    meterData.value = null
+  }
+}
+
 function openLatestPdf() {
   const b = ledgerData.value?.bills?.find((x: { pdf_exists?: boolean }) => x.pdf_exists)
   if (b) {
@@ -447,6 +482,7 @@ async function loadAllBillSummaries() {
 let interval: ReturnType<typeof setInterval>
 onMounted(() => {
   loadLedgerData()
+  loadMeterData()
   checkPdfExists()
   loadAllBillSummaries()
   interval = setInterval(() => {
@@ -646,6 +682,24 @@ onUnmounted(() => clearInterval(interval))
 }
 .ha-due-text {
   color: #e65100;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+/* Meter Tracking Boxes */
+.ha-meter-box {
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+}
+.ha-meter-text {
+  color: #2e7d32;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+.ha-cost-box {
+  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+}
+.ha-cost-text {
+  color: #7b1fa2;
   font-weight: 700;
   font-size: 1.1rem;
 }

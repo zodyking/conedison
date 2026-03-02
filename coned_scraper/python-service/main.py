@@ -401,6 +401,14 @@ async def startup_event():
         await _publish_bill_details_sensors()
     except Exception as e:
         add_log("warning", f"Failed to publish bill details sensors on startup: {e}")
+    
+    # Initialize meter tracking service
+    try:
+        from meter_service import init_meter_service
+        await init_meter_service()
+        add_log("info", "Meter tracking service initialized")
+    except Exception as e:
+        add_log("warning", f"Meter tracking service initialization failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -417,6 +425,14 @@ async def shutdown_event():
         from tts_scheduler import get_scheduler
         tts_scheduler = get_scheduler()
         await tts_scheduler.stop()
+    except Exception:
+        pass
+    
+    # Stop meter tracking service
+    try:
+        from meter_service import get_meter_service
+        meter_service = get_meter_service()
+        await meter_service.stop_polling()
     except Exception:
         pass
 
@@ -2331,6 +2347,188 @@ async def preview_imap_emails():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== Meter Tracking Configuration ==========
+
+class MeterConfigModel(BaseModel):
+    enabled: bool = False
+    email: str = ""
+    password: Optional[str] = None
+    mfa_type: str = "totp"
+    mfa_secret: str = ""
+    account_uuid: str = ""
+    meter_number: str = ""
+    polling_interval: int = 15
+
+
+@app.get("/api/meter-config")
+async def get_meter_config():
+    """Get meter tracking configuration (password masked)"""
+    from database import get_meter_config_db
+    
+    config = get_meter_config_db() or {
+        "enabled": False,
+        "email": "",
+        "password": "",
+        "mfa_type": "totp",
+        "mfa_secret": "",
+        "account_uuid": "",
+        "meter_number": "",
+        "polling_interval": 15
+    }
+    
+    if config.get('password'):
+        config['password'] = '••••••••'
+    
+    return config
+
+
+@app.post("/api/meter-config")
+async def save_meter_config_endpoint(config: MeterConfigModel):
+    """Save meter tracking configuration"""
+    from database import get_meter_config_db, save_meter_config_db
+    from meter_service import get_meter_service
+    
+    # Load existing config to preserve password if not provided
+    existing = get_meter_config_db() or {}
+    
+    new_config = {
+        "enabled": config.enabled,
+        "email": config.email.strip(),
+        "mfa_type": config.mfa_type,
+        "mfa_secret": config.mfa_secret.strip(),
+        "account_uuid": config.account_uuid.strip(),
+        "meter_number": config.meter_number.strip(),
+        "polling_interval": config.polling_interval,
+        "updated_at": utc_now_iso()
+    }
+    
+    # Handle password - keep existing if masked or empty
+    if config.password and config.password != '••••••••':
+        new_config['password'] = encrypt_data(config.password)
+    elif existing.get('password'):
+        new_config['password'] = existing['password']
+    else:
+        new_config['password'] = ''
+    
+    save_meter_config_db(new_config)
+    
+    # Reinitialize meter service with new config
+    service = get_meter_service()
+    await service.stop_polling()
+    
+    if new_config['enabled']:
+        # Decrypt password for initialization
+        init_config = new_config.copy()
+        if init_config.get('password'):
+            try:
+                init_config['password'] = decrypt_data(init_config['password'])
+            except:
+                pass
+        
+        success = await service.initialize(init_config)
+        if success:
+            await service.start_polling(new_config['polling_interval'])
+    
+    add_log("info", f"Meter config saved (enabled={new_config['enabled']})")
+    return {"success": True, "message": "Meter configuration saved"}
+
+
+@app.post("/api/meter-config/test")
+async def test_meter_connection():
+    """Test meter connection by fetching a reading"""
+    from database import get_meter_config_db
+    from meter_service import get_meter_service
+    
+    config = get_meter_config_db()
+    if not config:
+        raise HTTPException(status_code=400, detail="Meter not configured")
+    
+    # Decrypt password
+    if config.get('password'):
+        try:
+            config['password'] = decrypt_data(config['password'])
+        except:
+            raise HTTPException(status_code=400, detail="Failed to decrypt password")
+    
+    service = get_meter_service()
+    success = await service.initialize(config)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to initialize meter connection")
+    
+    reading = await service.fetch_reading()
+    
+    if reading:
+        return {
+            "success": True,
+            "message": f"Connected! Current reading: {reading['value']} {reading['unit']}",
+            "reading": reading
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to fetch meter reading")
+
+
+@app.get("/api/meter-reading")
+async def get_meter_reading():
+    """Get latest meter reading (cached or fresh)"""
+    from meter_service import get_meter_service
+    from database import get_latest_bill_with_details
+    
+    service = get_meter_service()
+    reading = service.get_cached_reading()
+    
+    if not reading:
+        return {
+            "enabled": service.is_enabled(),
+            "reading": None,
+            "cost": None
+        }
+    
+    # Calculate cost
+    cost = None
+    latest_bill = get_latest_bill_with_details()
+    if latest_bill and latest_bill.get('kwh_cost') and reading.get('value'):
+        kwh_cost = float(latest_bill['kwh_cost'])
+        cost = reading['value'] * kwh_cost
+    
+    return {
+        "enabled": service.is_enabled(),
+        "reading": reading,
+        "cost": cost,
+        "kwh_cost": latest_bill.get('kwh_cost') if latest_bill else None
+    }
+
+
+@app.post("/api/meter-reading/refresh")
+async def refresh_meter_reading():
+    """Force refresh meter reading"""
+    from meter_service import get_meter_service
+    from database import get_latest_bill_with_details
+    
+    service = get_meter_service()
+    
+    if not service.is_enabled():
+        raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
+    
+    reading = await service.fetch_reading()
+    
+    if not reading:
+        raise HTTPException(status_code=500, detail="Failed to fetch meter reading")
+    
+    # Calculate cost
+    cost = None
+    latest_bill = get_latest_bill_with_details()
+    if latest_bill and latest_bill.get('kwh_cost') and reading.get('value'):
+        kwh_cost = float(latest_bill['kwh_cost'])
+        cost = reading['value'] * kwh_cost
+    
+    return {
+        "success": True,
+        "reading": reading,
+        "cost": cost
+    }
 
 
 # ========== TTS Configuration ==========
