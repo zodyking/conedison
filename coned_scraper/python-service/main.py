@@ -2477,32 +2477,49 @@ async def test_meter_connection():
 
 @app.get("/api/meter-reading")
 async def get_meter_reading():
-    """Get latest meter reading (cached or fresh)"""
+    """Get latest meter reading (cached or fresh) with forecast data"""
     from meter_service import get_meter_service
     from database import get_latest_bill_with_details
     
     service = get_meter_service()
     reading = service.get_cached_reading()
     
+    # Fetch forecast data for usage_to_date
+    forecast = None
+    if service.is_enabled():
+        try:
+            forecast = await service.fetch_forecast()
+        except Exception:
+            forecast = None
+    
     if not reading:
         return {
             "enabled": service.is_enabled(),
             "reading": None,
-            "cost": None
+            "cost": None,
+            "forecast": forecast
         }
     
-    # Calculate cost
+    # Calculate cost using kwh_cost from latest bill
     cost = None
+    usage_to_date_cost = None
     latest_bill = get_latest_bill_with_details()
-    if latest_bill and latest_bill.get('kwh_cost') and reading.get('value'):
-        kwh_cost = float(latest_bill['kwh_cost'])
-        cost = reading['value'] * kwh_cost
+    kwh_cost = latest_bill.get('kwh_cost') if latest_bill else None
+    
+    if kwh_cost and reading.get('value'):
+        cost = reading['value'] * float(kwh_cost)
+    
+    # Calculate usage_to_date cost from forecast
+    if kwh_cost and forecast and forecast.get('usage_to_date'):
+        usage_to_date_cost = forecast['usage_to_date'] * float(kwh_cost)
     
     return {
         "enabled": service.is_enabled(),
         "reading": reading,
         "cost": cost,
-        "kwh_cost": latest_bill.get('kwh_cost') if latest_bill else None
+        "kwh_cost": kwh_cost,
+        "forecast": forecast,
+        "usage_to_date_cost": usage_to_date_cost
     }
 
 

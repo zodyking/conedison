@@ -65,14 +65,14 @@
             </div>
           </div>
           <!-- Meter Tracking Row -->
-          <div class="ha-summary-row ha-summary-row-two" v-if="meterData?.enabled && meterData?.reading">
-            <div class="ha-summary-box ha-meter-box">
+          <div class="ha-summary-row ha-summary-row-two" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
+            <div class="ha-summary-box ha-meter-highlight">
               <div class="ha-summary-label">Current Meter Usage</div>
-              <div class="ha-summary-value ha-meter-text">{{ meterData.reading.value ?? '—' }} {{ meterData.reading.unit || 'kWh' }}</div>
+              <div class="ha-summary-value ha-meter-highlight-value">{{ meterData.forecast.usage_to_date }} kWh</div>
             </div>
-            <div class="ha-summary-box ha-cost-box">
+            <div class="ha-summary-box ha-cost-highlight">
               <div class="ha-summary-label">Current Usage Cost</div>
-              <div class="ha-summary-value ha-cost-text">${{ meterData.cost?.toFixed(2) || '—' }}</div>
+              <div class="ha-summary-value ha-cost-highlight-value">${{ meterData.usage_to_date_cost?.toFixed(2) || '—' }}</div>
             </div>
           </div>
           <div class="ha-summary-actions">
@@ -336,6 +336,14 @@ interface MeterReadingData {
     fetched_at: string
   } | null
   cost: number | null
+  forecast: {
+    usage_to_date: number | null
+    forecasted_usage: number | null
+    start_date: string | null
+    end_date: string | null
+  } | null
+  usage_to_date_cost: number | null
+  kwh_cost: number | null
 }
 const meterData = ref<MeterReadingData | null>(null)
 
@@ -686,22 +694,40 @@ onUnmounted(() => clearInterval(interval))
   font-size: 1.1rem;
 }
 
-/* Meter Tracking Boxes */
-.ha-meter-box {
-  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+/* Meter Tracking Boxes - Highlight Style (no background, prominent text) */
+.ha-meter-highlight {
+  background: transparent;
+  border: 2px solid #2e7d32;
+  border-radius: 8px;
 }
-.ha-meter-text {
+.ha-meter-highlight .ha-summary-label {
   color: #2e7d32;
-  font-weight: 700;
-  font-size: 1.1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.5px;
 }
-.ha-cost-box {
-  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+.ha-meter-highlight-value {
+  color: #1b5e20;
+  font-weight: 800;
+  font-size: 1.4rem;
 }
-.ha-cost-text {
+.ha-cost-highlight {
+  background: transparent;
+  border: 2px solid #7b1fa2;
+  border-radius: 8px;
+}
+.ha-cost-highlight .ha-summary-label {
   color: #7b1fa2;
-  font-weight: 700;
-  font-size: 1.1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.5px;
+}
+.ha-cost-highlight-value {
+  color: #4a148c;
+  font-weight: 800;
+  font-size: 1.4rem;
 }
 
 /* Bill Card - Collapsible */

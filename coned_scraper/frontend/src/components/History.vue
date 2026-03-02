@@ -56,6 +56,7 @@
       <div class="ha-chart-card ha-chart-tabs-card">
         <div class="ha-chart-tabs">
           <button 
+            v-if="meterEnabled && realtimeData.length"
             class="ha-chart-tab" 
             :class="{ active: activeChartTab === 'realtime' }"
             @click="activeChartTab = 'realtime'"
@@ -99,7 +100,7 @@
         
         <div class="ha-chart-tab-content">
           <!-- Real Time Usage Chart (Last 24 Hours) -->
-          <div v-show="activeChartTab === 'realtime'" class="ha-chart-container">
+          <div v-show="activeChartTab === 'realtime'" class="ha-chart-container ha-chart-container-tall">
             <div v-if="realtimeLoading" class="ha-realtime-loading">
               <div class="ha-loading-spinner small"></div>
               <span>Loading real-time data...</span>
@@ -111,26 +112,31 @@
               <p>No real-time usage data available.</p>
               <p class="ha-realtime-hint">Enable Meter Tracking in Settings to view quarter-hour usage data.</p>
             </div>
-            <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
+            <template v-if="realtimeData.length && !realtimeLoading">
+              <canvas ref="realtimeChart"></canvas>
+              <div class="ha-realtime-disclaimer">
+                Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
+              </div>
+            </template>
           </div>
           
           <!-- Bill History Chart -->
-          <div v-show="activeChartTab === 'billHistory'" class="ha-chart-container">
+          <div v-show="activeChartTab === 'billHistory'" class="ha-chart-container ha-chart-container-tall">
             <canvas ref="billChart"></canvas>
           </div>
           
           <!-- kWh Usage Chart -->
-          <div v-show="activeChartTab === 'kwh'" class="ha-chart-container">
+          <div v-show="activeChartTab === 'kwh'" class="ha-chart-container ha-chart-container-tall">
             <canvas ref="kwhChart"></canvas>
           </div>
           
           <!-- kWh Cost Chart -->
-          <div v-show="activeChartTab === 'cost'" class="ha-chart-container">
+          <div v-show="activeChartTab === 'cost'" class="ha-chart-container ha-chart-container-tall">
             <canvas ref="kwhCostChart"></canvas>
           </div>
           
           <!-- Supply & Delivery Charges -->
-          <div v-show="activeChartTab === 'rates'" class="ha-chart-container">
+          <div v-show="activeChartTab === 'rates'" class="ha-chart-container ha-chart-container-tall">
             <canvas ref="supplyDeliveryChart"></canvas>
           </div>
         </div>
@@ -236,12 +242,13 @@ interface RealtimeReading {
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const historyData = ref<HistoryRow[]>([])
-const activeChartTab = ref<'realtime' | 'billHistory' | 'kwh' | 'cost' | 'rates'>('realtime')
+const activeChartTab = ref<'realtime' | 'billHistory' | 'kwh' | 'cost' | 'rates'>('billHistory')
 
 // Realtime data state
 const realtimeData = ref<RealtimeReading[]>([])
 const realtimeLoading = ref(false)
 const realtimeError = ref<string | null>(null)
+const meterEnabled = ref(false)
 
 const realtimeChart = ref<HTMLCanvasElement | null>(null)
 const kwhChart = ref<HTMLCanvasElement | null>(null)
@@ -362,11 +369,31 @@ async function fetchRealtimeData() {
   realtimeLoading.value = true
   realtimeError.value = null
   try {
+    // First check if meter tracking is enabled
+    const statusRes = await fetch(`${getApiBase()}/meter-reading`)
+    if (statusRes.ok) {
+      const statusData = await statusRes.json()
+      meterEnabled.value = statusData.enabled && statusData.reading !== null
+    }
+    
+    if (!meterEnabled.value) {
+      realtimeData.value = []
+      // Switch to a different default tab if realtime not available
+      if (activeChartTab.value === 'realtime') {
+        activeChartTab.value = 'billHistory'
+      }
+      return
+    }
+    
     const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=24`)
     if (!res.ok) {
       if (res.status === 400) {
         // Meter tracking not enabled - not an error
+        meterEnabled.value = false
         realtimeData.value = []
+        if (activeChartTab.value === 'realtime') {
+          activeChartTab.value = 'billHistory'
+        }
         return
       }
       throw new Error(`HTTP ${res.status}`)
@@ -374,12 +401,22 @@ async function fetchRealtimeData() {
     const data = await res.json()
     realtimeData.value = data.readings || []
     
+    // If no data returned, meter is enabled but no readings yet
+    if (!realtimeData.value.length) {
+      meterEnabled.value = false
+      if (activeChartTab.value === 'realtime') {
+        activeChartTab.value = 'billHistory'
+      }
+      return
+    }
+    
     // Create the realtime chart after data is loaded
     await nextTick()
     createRealtimeChart()
   } catch (e: any) {
     realtimeError.value = e.message || 'Failed to load real-time data'
     realtimeData.value = []
+    meterEnabled.value = false
   } finally {
     realtimeLoading.value = false
   }
@@ -847,6 +884,10 @@ onUnmounted(() => {
   height: 280px;
 }
 
+.ha-chart-container-tall {
+  height: 365px;
+}
+
 /* Primary chart (Bill Totals) */
 .ha-chart-primary {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -907,11 +948,26 @@ onUnmounted(() => {
 }
 
 .ha-chart-tab-content {
-  min-height: 280px;
+  min-height: 365px;
 }
 
 .ha-chart-tab-content .ha-chart-container {
   height: 280px;
+}
+
+.ha-chart-tab-content .ha-chart-container-tall {
+  height: 365px;
+}
+
+.ha-realtime-disclaimer {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #fff8e1;
+  border: 1px solid #ffcc02;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #8d6e00;
+  line-height: 1.5;
 }
 
 .ha-table-container {
@@ -1008,6 +1064,10 @@ onUnmounted(() => {
   .ha-chart-container {
     height: 220px;
   }
+
+  .ha-chart-container-tall {
+    height: 290px;
+  }
   
   .ha-chart-tab {
     padding: 12px 14px;
@@ -1018,10 +1078,21 @@ onUnmounted(() => {
     font-size: 12px;
   }
   
-  .ha-chart-tab-content,
+  .ha-chart-tab-content {
+    min-height: 290px;
+  }
+
   .ha-chart-tab-content .ha-chart-container {
-    min-height: 220px;
     height: 220px;
+  }
+
+  .ha-chart-tab-content .ha-chart-container-tall {
+    height: 290px;
+  }
+
+  .ha-realtime-disclaimer {
+    font-size: 10px;
+    padding: 8px 10px;
   }
   
   .ha-history-table {
