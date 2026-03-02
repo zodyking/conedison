@@ -62,7 +62,10 @@
             @click="activeChartTab = 'realtime'"
           >
             <span class="ha-tab-icon">⚡</span>
-            <span class="ha-tab-label">Real Time Usage (Last 24 Hours)</span>
+            <span class="ha-tab-label">
+              Recent Usage
+              <span v-if="realtimeDataRange?.isStale" class="ha-tab-stale">({{ realtimeDataRange.hoursAgo }}h ago)</span>
+            </span>
           </button>
           <button 
             class="ha-chart-tab" 
@@ -116,6 +119,9 @@
               <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
             </div>
             <div v-if="realtimeData.length && !realtimeLoading" class="ha-realtime-disclaimer">
+              <p v-if="realtimeDataRange?.isStale" class="ha-delay-notice">
+                <strong>Data is {{ realtimeDataRange.hoursAgo }} hours behind.</strong> Con Edison usage data is typically delayed 1-24 hours.
+              </p>
               Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
             </div>
           </div>
@@ -431,6 +437,19 @@ function destroyRealtimeChart() {
   }
 }
 
+const realtimeDataRange = computed(() => {
+  if (!realtimeData.value.length) return null
+  const first = new Date(realtimeData.value[0].start_time)
+  const last = new Date(realtimeData.value[realtimeData.value.length - 1].end_time)
+  const hoursAgo = Math.round((Date.now() - last.getTime()) / (1000 * 60 * 60))
+  return {
+    first,
+    last,
+    hoursAgo,
+    isStale: hoursAgo > 2
+  }
+})
+
 function createRealtimeChart() {
   destroyRealtimeChart()
   
@@ -439,16 +458,25 @@ function createRealtimeChart() {
   const ctx = realtimeChart.value.getContext('2d')
   if (!ctx) return
   
-  // Filter to last 24 hours and format data
-  const now = new Date()
-  const last24Hours = realtimeData.value.filter(r => {
-    const endTime = new Date(r.end_time)
-    return (now.getTime() - endTime.getTime()) <= 24 * 60 * 60 * 1000
-  })
+  // Use all available data (opower data is delayed, don't filter by "now")
+  const chartData = realtimeData.value
   
-  // Format labels as time (e.g., "2:30 PM")
-  const labels = last24Hours.map(r => {
+  // Format labels as time (e.g., "2:30 PM") with date if spans multiple days
+  const firstDate = new Date(chartData[0].start_time).toDateString()
+  const lastDate = new Date(chartData[chartData.length - 1].end_time).toDateString()
+  const showDate = firstDate !== lastDate
+  
+  const labels = chartData.map(r => {
     const date = new Date(r.end_time)
+    if (showDate) {
+      return date.toLocaleString('en-US', { 
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      })
+    }
     return date.toLocaleTimeString('en-US', { 
       hour: 'numeric', 
       minute: '2-digit',
@@ -456,7 +484,7 @@ function createRealtimeChart() {
     })
   })
   
-  const consumption = last24Hours.map(r => r.consumption)
+  const consumption = chartData.map(r => r.consumption)
   
   realtimeChartInstance = new Chart(ctx, {
     type: 'line',
@@ -486,11 +514,12 @@ function createRealtimeChart() {
         tooltip: {
           callbacks: {
             title: (items) => {
-              if (items.length && last24Hours[items[0].dataIndex]) {
-                const r = last24Hours[items[0].dataIndex]
+              if (items.length && chartData[items[0].dataIndex]) {
+                const r = chartData[items[0].dataIndex]
                 const start = new Date(r.start_time)
                 const end = new Date(r.end_time)
-                return `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+                const dateStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                return `${dateStr} ${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
               }
               return ''
             },
@@ -985,6 +1014,20 @@ onUnmounted(() => {
   font-size: 11px;
   color: #8d6e00;
   line-height: 1.5;
+}
+
+.ha-realtime-disclaimer .ha-delay-notice {
+  margin: 0 0 8px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ffcc02;
+  color: #b38600;
+}
+
+.ha-tab-stale {
+  font-size: 10px;
+  color: #ff9800;
+  font-weight: normal;
+  margin-left: 4px;
 }
 
 .ha-table-container {

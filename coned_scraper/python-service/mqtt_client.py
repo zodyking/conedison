@@ -411,28 +411,53 @@ class MQTTClient:
         await loop.run_in_executor(None, self._publish_discovery_sync)
     
     def _get_discovery_topics(self) -> list:
-        """Get list of all discovery topics for cleanup."""
+        """Get list of all discovery topics for cleanup.
+        
+        Includes current names, old names, and common variations to ensure
+        thorough cleanup of any orphaned or duplicate sensors.
+        """
         dp = self.DISCOVERY_PREFIX
-        return [
-            f"{dp}/sensor/ConEd_account_balance/config",
-            f"{dp}/sensor/ConEd_latest_bill/config",
-            f"{dp}/sensor/ConEd_previous_bill/config",
-            f"{dp}/sensor/ConEd_last_payment/config",
-            f"{dp}/sensor/ConEd_bill_pdf_url/config",
-            f"{dp}/sensor/ConEd_payee_summary/config",
-            f"{dp}/sensor/ConEd_due_date/config",
-            f"{dp}/sensor/ConEd_kwh_cost/config",
-            f"{dp}/sensor/ConEd_last_bill_kwh/config",
-            f"{dp}/sensor/ConEd_current_meter_usage/config",
-            f"{dp}/sensor/ConEd_current_usage_cost/config",
-            f"{dp}/sensor/ConEd_billing_start_date/config",
-            f"{dp}/sensor/ConEd_billing_end_date/config",
-            f"{dp}/sensor/ConEd_current_cycle_usage/config",
-            f"{dp}/sensor/ConEd_forecasted_usage/config",
-            # Also clean up old sensor names for migration
-            f"{dp}/sensor/ConEd_kwh_used/config",
-            f"{dp}/sensor/ConEd_usage_to_date/config",
+        base_sensors = [
+            "ConEd_account_balance",
+            "ConEd_latest_bill",
+            "ConEd_previous_bill",
+            "ConEd_last_payment",
+            "ConEd_bill_pdf_url",
+            "ConEd_payee_summary",
+            "ConEd_due_date",
+            "ConEd_kwh_cost",
+            "ConEd_last_bill_kwh",
+            "ConEd_current_meter_usage",
+            "ConEd_current_usage_cost",
+            "ConEd_billing_start_date",
+            "ConEd_billing_end_date",
+            "ConEd_current_cycle_usage",
+            "ConEd_forecasted_usage",
+            # Old sensor names for migration
+            "ConEd_kwh_used",
+            "ConEd_usage_to_date",
+            # Legacy names without ConEd prefix
+            "coned_account_balance",
+            "coned_latest_bill",
+            "coned_previous_bill",
+            "coned_last_payment",
+            "coned_bill_pdf_url",
+            "coned_payee_summary",
+            "coned_due_date",
+            "coned_kwh_cost",
+            "coned_kwh_used",
+            "coned_current_meter_usage",
+            "coned_current_usage_cost",
         ]
+        
+        topics = []
+        for sensor in base_sensors:
+            topics.append(f"{dp}/sensor/{sensor}/config")
+            # Also try with _2, _3 suffixes that HA creates for duplicates
+            for i in range(2, 6):
+                topics.append(f"{dp}/sensor/{sensor}_{i}/config")
+        
+        return topics
     
     def cleanup_discovery_sync(self):
         """Remove all MQTT discovery messages by publishing empty retained messages."""
