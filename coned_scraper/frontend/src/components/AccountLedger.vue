@@ -64,6 +64,21 @@
               <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
             </div>
           </div>
+          <!-- Section Divider for Current Billing Period -->
+          <div class="ha-section-divider" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
+            <span class="ha-section-label">Current Billing Period Statistics</span>
+          </div>
+          <!-- Billing Period Start/End Dates Row -->
+          <div class="ha-summary-row ha-summary-row-two" v-if="meterData?.enabled && meterData?.forecast?.start_date">
+            <div class="ha-summary-box ha-billing-date-box">
+              <div class="ha-summary-label">Billing Start Date</div>
+              <div class="ha-summary-value ha-billing-date-value">{{ formatBillingDate(meterData.forecast.start_date) }}</div>
+            </div>
+            <div class="ha-summary-box ha-billing-date-box">
+              <div class="ha-summary-label">Billing End Date</div>
+              <div class="ha-summary-value ha-billing-date-value">{{ formatBillingDate(meterData.forecast.end_date) }}</div>
+            </div>
+          </div>
           <!-- Meter Tracking Row - All 4 fields inline -->
           <div class="ha-summary-row ha-summary-row-four" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
             <div class="ha-summary-box-compact ha-meter-highlight">
@@ -81,13 +96,6 @@
             <div class="ha-summary-box-compact ha-projected-cost-highlight">
               <div class="ha-summary-label-sm">Projected Bill</div>
               <div class="ha-summary-value-sm ha-projected-cost-value">${{ projectedBillCost }}</div>
-            </div>
-          </div>
-          <!-- Billing Period Row -->
-          <div class="ha-summary-row ha-billing-period-row" v-if="meterData?.enabled && meterData?.forecast?.start_date">
-            <div class="ha-billing-period-label">Billing Period:</div>
-            <div class="ha-billing-period-dates">
-              {{ formatBillingDate(meterData.forecast.start_date) }} — {{ formatBillingDate(meterData.forecast.end_date) }}
             </div>
           </div>
           <div class="ha-summary-actions">
@@ -850,25 +858,36 @@ onUnmounted(() => clearInterval(interval))
   font-size: 0.95rem;
 }
 
-/* Billing period row */
-.ha-billing-period-row {
+/* Section divider for current billing period */
+.ha-section-divider {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  margin: 0.75rem 0 0.5rem;
   padding: 0.5rem 0;
-  font-size: 0.85rem;
-  color: #555;
-  flex-wrap: wrap;
 }
 
-.ha-billing-period-label {
+.ha-section-label {
+  font-size: 0.75rem;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   color: #666;
+  background: #f5f5f5;
+  padding: 0.35rem 1rem;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
 }
 
-.ha-billing-period-dates {
-  color: #333;
-  font-weight: 500;
+/* Billing date boxes */
+.ha-billing-date-box {
+  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+}
+
+.ha-billing-date-value {
+  color: #6a1b9a;
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
 /* Responsive adjustments for 4-column layout */
@@ -885,14 +904,13 @@ onUnmounted(() => clearInterval(interval))
     font-size: 0.85rem;
   }
   
-  .ha-billing-period-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.25rem;
+  .ha-billing-date-value {
+    font-size: 0.8rem;
   }
   
-  .ha-billing-period-dates {
-    font-size: 0.8rem;
+  .ha-section-label {
+    font-size: 0.65rem;
+    padding: 0.3rem 0.75rem;
   }
 }
 
