@@ -1152,6 +1152,43 @@ async def get_mqtt_config():
             "mqtt_discovery": True,
         }
 
+@app.post("/api/mqtt-cleanup")
+async def cleanup_mqtt_sensors():
+    """Remove all MQTT discovery messages (clears retained sensors from broker).
+    
+    Use this to fix duplicate sensor issues - it publishes empty retained messages
+    to all discovery topics, which tells Home Assistant to remove those sensors.
+    After running this, restart the addon to re-register sensors cleanly.
+    """
+    try:
+        mqtt_config = load_mqtt_config()
+        if not mqtt_config.get("mqtt_url"):
+            raise HTTPException(status_code=400, detail="MQTT not configured")
+        
+        from mqtt_client import init_mqtt_client
+        
+        client = init_mqtt_client(
+            mqtt_url=mqtt_config.get("mqtt_url", ""),
+            username=mqtt_config.get("mqtt_username", ""),
+            password=mqtt_config.get("mqtt_password", ""),
+            base_topic=mqtt_config.get("mqtt_base_topic", "coned"),
+            qos=mqtt_config.get("mqtt_qos", 1),
+            retain=mqtt_config.get("mqtt_retain", True),
+            discovery=mqtt_config.get("mqtt_discovery", True),
+        )
+        
+        if not client:
+            raise HTTPException(status_code=500, detail="Failed to create MQTT client")
+        
+        await client.cleanup_discovery()
+        add_log("success", "MQTT discovery cleanup completed - sensors removed from broker")
+        return {"message": "MQTT sensors cleared. Restart addon to re-register."}
+    except Exception as e:
+        error_msg = f"MQTT cleanup failed: {str(e)}"
+        add_log("error", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
 @app.post("/api/app-settings")
 async def save_app_settings_endpoint(settings: AppSettingsModel):
     """Save app settings (time offset, password)"""

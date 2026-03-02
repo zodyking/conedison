@@ -52,6 +52,29 @@
         <button type="submit" class="ha-button ha-button-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save MQTT Config' }}</button>
       </form>
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
+      
+      <!-- MQTT Cleanup Section -->
+      <div class="ha-card-divider"></div>
+      <div class="cleanup-section">
+        <div class="cleanup-header">
+          <span class="cleanup-icon">🧹</span>
+          <span class="cleanup-title">Sensor Cleanup</span>
+        </div>
+        <div class="info-text" style="margin-bottom: 1rem">
+          If you see duplicate sensors (e.g., <code>sensor.ConEd_account_balance_2</code>), use this to clear all retained MQTT discovery messages from the broker. After cleanup, restart the addon to re-register sensors cleanly.
+        </div>
+        <button 
+          type="button" 
+          class="ha-button ha-button-warning" 
+          :disabled="isCleaningUp"
+          @click="handleCleanup"
+        >
+          {{ isCleaningUp ? 'Cleaning up...' : 'Clear Duplicate Sensors' }}
+        </button>
+        <div v-if="cleanupMessage" :class="['ha-message', cleanupMessage.type]" style="margin-top: 0.75rem">
+          {{ cleanupMessage.text }}
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -68,7 +91,9 @@ const mqttQos = ref(1)
 const mqttRetain = ref(true)
 const mqttDiscovery = ref(true)
 const isLoading = ref(false)
+const isCleaningUp = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const cleanupMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 
 async function loadMqttConfig() {
   try {
@@ -119,6 +144,29 @@ async function handleSave() {
   }
 }
 
+async function handleCleanup() {
+  isCleaningUp.value = true
+  cleanupMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/mqtt-cleanup`, {
+      method: 'POST',
+    })
+    if (res.ok) {
+      cleanupMessage.value = { 
+        type: 'success', 
+        text: 'MQTT sensors cleared from broker. Please restart the addon to re-register sensors cleanly.' 
+      }
+    } else {
+      const err = await res.json().catch(() => ({}))
+      cleanupMessage.value = { type: 'error', text: err.detail || 'Failed to clean up MQTT sensors' }
+    }
+  } catch {
+    cleanupMessage.value = { type: 'error', text: 'Failed to connect to API.' }
+  } finally {
+    isCleaningUp.value = false
+  }
+}
+
 onMounted(loadMqttConfig)
 </script>
 
@@ -131,4 +179,20 @@ code { font-family: monospace; font-size: 0.9em; background: #f0f0f0; padding: 0
 .ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
+.ha-card-divider { border-top: 1px solid #e0e0e0; margin: 1.5rem 0; }
+.cleanup-section { padding-top: 0.5rem; }
+.cleanup-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+.cleanup-icon { font-size: 1.25rem; }
+.cleanup-title { font-weight: 600; font-size: 1rem; }
+.ha-button-warning { 
+  background: #ff9800; 
+  color: white; 
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.ha-button-warning:hover { background: #f57c00; }
+.ha-button-warning:disabled { background: #ffcc80; cursor: not-allowed; }
 </style>

@@ -410,6 +410,50 @@ class MQTTClient:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._publish_discovery_sync)
     
+    def _get_discovery_topics(self) -> list:
+        """Get list of all discovery topics for cleanup."""
+        dp = self.DISCOVERY_PREFIX
+        return [
+            f"{dp}/sensor/ConEd_account_balance/config",
+            f"{dp}/sensor/ConEd_latest_bill/config",
+            f"{dp}/sensor/ConEd_previous_bill/config",
+            f"{dp}/sensor/ConEd_last_payment/config",
+            f"{dp}/sensor/ConEd_bill_pdf_url/config",
+            f"{dp}/sensor/ConEd_payee_summary/config",
+            f"{dp}/sensor/ConEd_due_date/config",
+            f"{dp}/sensor/ConEd_kwh_cost/config",
+            f"{dp}/sensor/ConEd_kwh_used/config",
+            f"{dp}/sensor/ConEd_current_meter_usage/config",
+            f"{dp}/sensor/ConEd_current_usage_cost/config",
+            f"{dp}/sensor/ConEd_billing_start_date/config",
+            f"{dp}/sensor/ConEd_billing_end_date/config",
+            f"{dp}/sensor/ConEd_usage_to_date/config",
+            f"{dp}/sensor/ConEd_forecasted_usage/config",
+        ]
+    
+    def cleanup_discovery_sync(self):
+        """Remove all MQTT discovery messages by publishing empty retained messages."""
+        if not self.enabled or not self.client or not self.connected:
+            return
+        
+        topics = self._get_discovery_topics()
+        try:
+            for topic in topics:
+                self.client.publish(topic, "", qos=self.qos, retain=True)
+                logger.info(f"MQTT discovery removed: {topic}")
+            logger.info(f"MQTT discovery cleanup completed: {len(topics)} topics cleared")
+        except Exception as e:
+            logger.warning(f"MQTT discovery cleanup failed: {e}")
+    
+    async def cleanup_discovery(self):
+        """Remove all MQTT discovery messages (async wrapper)."""
+        if not self.enabled:
+            return
+        if not await self.ensure_connected():
+            return
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.cleanup_discovery_sync)
+    
     def _extract_numeric(self, value: str) -> str:
         """Extract numeric value from string (e.g., '$123.45' -> '123.45')"""
         if not value:
