@@ -50,6 +50,7 @@ class MQTTClient:
         self.client = None
         self.connected = False
         self._connect_lock = asyncio.Lock()
+        self._discovery_published = False
         
         # Parse MQTT URL
         if mqtt_url.startswith("mqtts://"):
@@ -163,6 +164,12 @@ class MQTTClient:
         """Publish MQTT discovery configs (sync, called from connect callback)"""
         if not self.enabled or not self.client or not self.connected or not self.discovery:
             return
+        
+        # Prevent duplicate discovery publications
+        if self._discovery_published:
+            logger.debug("MQTT discovery already published, skipping duplicate")
+            return
+        
         import time
         time.sleep(0.3)  # Brief delay so connection is fully ready
         bt = self.base_topic
@@ -388,6 +395,9 @@ class MQTTClient:
                     retain=True,
                 )
                 logger.info(f"MQTT discovery published: {cfg['topic']}")
+            # Mark discovery as published to prevent duplicates
+            self._discovery_published = True
+            logger.info(f"MQTT discovery completed: {len(configs)} sensors registered")
         except Exception as e:
             logger.warning(f"MQTT discovery publish failed: {e}")
 
