@@ -576,7 +576,7 @@ function createCharts() {
           labels,
           datasets: [
             {
-              label: 'Current Cycle',
+              label: 'Cycle Usage',
               data: chartData.map(r => r.total_from_billing_period || r.electricity_total || r.amount_numeric || 0),
               backgroundColor: 'rgba(34, 139, 34, 0.7)',
               borderColor: 'rgba(34, 139, 34, 1)',
@@ -584,7 +584,7 @@ function createCharts() {
               borderRadius: 4
             },
             {
-              label: 'Previous Balance',
+              label: 'Roll-over Balance',
               data: chartData.map(r => r.balance_from_previous_bill || 0),
               backgroundColor: 'rgba(255, 99, 132, 0.7)',
               borderColor: 'rgba(255, 99, 132, 1)',

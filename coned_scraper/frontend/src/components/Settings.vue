@@ -138,7 +138,6 @@
         <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
         <SettingsTtsTab v-else-if="currentPage === 'tts'" />
         <SettingsImapTab v-else-if="currentPage === 'imap'" />
-        <SettingsMeterTab v-else-if="currentPage === 'meter'" />
       </div>
     </template>
   </div>
@@ -155,7 +154,6 @@ import SettingsAppTab from './settings/SettingsAppTab.vue'
 import SettingsPayeesPaymentsTab from './settings/SettingsPayeesPaymentsTab.vue'
 import SettingsTtsTab from './settings/SettingsTtsTab.vue'
 import SettingsImapTab from './settings/SettingsImapTab.vue'
-import SettingsMeterTab from './settings/SettingsMeterTab.vue'
 
 type Page =
   | 'menu'
@@ -167,7 +165,6 @@ type Page =
   | 'payees-payments'
   | 'tts'
   | 'imap'
-  | 'meter'
 
 const currentPage = ref<Page>('menu')
 const isUnlocked = ref(false)
@@ -188,13 +185,12 @@ const adminResetLoading = ref(false)
 
 const menuItems = [
   { id: 'console' as Page, icon: '📊', label: 'Console', description: 'View logs and system status' },
-  { id: 'credentials' as Page, icon: '🔐', label: 'Credentials', description: 'Con Edison login credentials' },
+  { id: 'credentials' as Page, icon: '🔐', label: 'Credentials & Meter', description: 'Con Edison login and meter tracking' },
   { id: 'automated' as Page, icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
   { id: 'mqtt' as Page, icon: '📡', label: 'MQTT', description: 'Home Assistant MQTT integration' },
   { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, cards, and payment audit' },
   { id: 'tts' as Page, icon: '🔊', label: 'TTS Alerts', description: 'Media player, TTS messages, and wait-for-idle' },
   { id: 'imap' as Page, icon: '📧', label: 'Email / IMAP', description: 'Email parsing for auto-payment detection' },
-  { id: 'meter' as Page, icon: '⚡', label: 'Meter Tracking', description: 'Real-time meter usage from Con Edison' },
   { id: 'app-settings' as Page, icon: '⚙️', label: 'App Settings', description: 'Password and app configuration' },
 ]
 
