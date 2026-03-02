@@ -2451,9 +2451,14 @@ async def preview_tts_message():
     projected_usage_kwh = ""
     projected_usage_cost = ""
     
-    add_log("debug", f"TTS Preview: current_usage_sensor={current_usage_sensor}, future_usage_sensor={future_usage_sensor}")
+    add_log("debug", f"TTS Preview: current_usage_sensor='{current_usage_sensor}', future_usage_sensor='{future_usage_sensor}'")
     
     token = os.environ.get("SUPERVISOR_TOKEN")
+    add_log("debug", f"TTS Preview: SUPERVISOR_TOKEN available={bool(token)}")
+    
+    if not token:
+        add_log("warning", "No SUPERVISOR_TOKEN - cannot fetch sensor states from Home Assistant")
+    
     if token and (current_usage_sensor or future_usage_sensor):
         try:
             async with aiohttp.ClientSession() as session:
@@ -2470,7 +2475,7 @@ async def preview_tts_message():
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
                                 unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                add_log("debug", f"Current usage state={sensor_state}, unit={unit}")
+                                add_log("debug", f"Current usage state='{sensor_state}', unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
@@ -2478,8 +2483,12 @@ async def preview_tts_message():
                                         if kwh_cost:
                                             cost_value = kwh_value * kwh_cost
                                             current_usage_cost = f"${cost_value:.2f}"
+                                        add_log("debug", f"Current usage computed: kwh={current_usage_kwh}, cost={current_usage_cost}")
                                     except ValueError:
                                         current_usage_kwh = f"{sensor_state} {unit}"
+                                        add_log("debug", f"Current usage non-numeric: {current_usage_kwh}")
+                                else:
+                                    add_log("warning", f"Current usage sensor state is '{sensor_state}' - skipping")
                             else:
                                 add_log("warning", f"Current usage sensor returned status {resp.status}")
                     except Exception as e:
@@ -2498,7 +2507,7 @@ async def preview_tts_message():
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
                                 unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                add_log("debug", f"Future usage state={sensor_state}, unit={unit}")
+                                add_log("debug", f"Future usage state='{sensor_state}', unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
@@ -2506,8 +2515,12 @@ async def preview_tts_message():
                                         if kwh_cost:
                                             cost_value = kwh_value * kwh_cost
                                             projected_usage_cost = f"${cost_value:.2f}"
+                                        add_log("debug", f"Future usage computed: kwh={projected_usage_kwh}, cost={projected_usage_cost}")
                                     except ValueError:
                                         projected_usage_kwh = f"{sensor_state} {unit}"
+                                        add_log("debug", f"Future usage non-numeric: {projected_usage_kwh}")
+                                else:
+                                    add_log("warning", f"Future usage sensor state is '{sensor_state}' - skipping")
                             else:
                                 add_log("warning", f"Future usage sensor returned status {resp.status}")
                     except Exception as e:

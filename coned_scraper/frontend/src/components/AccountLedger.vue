@@ -54,17 +54,12 @@
           <span>Account Summary</span>
         </div>
         <div class="ha-card-content ha-summary-content">
-          <div class="ha-summary-row">
-            <div class="ha-summary-balance-box">
+          <div class="ha-summary-row ha-summary-row-two">
+            <div class="ha-summary-box ha-balance-box">
               <div class="ha-summary-label">Current Balance</div>
               <div class="ha-summary-value ha-balance-text">{{ ledgerData.account_balance || '—' }}</div>
             </div>
-            <div class="ha-summary-info">
-              <div class="ha-summary-label">Last Bill</div>
-              <div class="ha-summary-value ha-bill-text">{{ ledgerData.latest_bill?.bill_total || '—' }}</div>
-              <div class="ha-summary-sub">{{ ledgerData.latest_bill?.month_range || '' }}</div>
-            </div>
-            <div class="ha-summary-info ha-due-box" v-if="latestBillDueDate">
+            <div class="ha-summary-box ha-due-box" v-if="latestBillDueDate">
               <div class="ha-summary-label">Due Date</div>
               <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
             </div>
@@ -574,12 +569,22 @@ onUnmounted(() => clearInterval(interval))
   gap: 0.75rem;
   margin-bottom: 0.4rem;
 }
-.ha-summary-balance-box {
+.ha-summary-row-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.ha-summary-box {
   text-align: center;
-  padding: 0.4rem 0.75rem;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  padding: 0.6rem 0.75rem;
   border-radius: 6px;
-  flex: 0 0 auto;
+  flex: 1;
+}
+.ha-balance-box {
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+}
+.ha-balance-box .ha-balance-text {
+  color: #0277bd;
 }
 .ha-summary-label {
   font-size: 0.5rem;
@@ -638,12 +643,11 @@ onUnmounted(() => clearInterval(interval))
 /* Due Date in Summary */
 .ha-due-box {
   background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
 }
 .ha-due-text {
   color: #e65100;
   font-weight: 700;
+  font-size: 1.1rem;
 }
 
 /* Bill Card - Collapsible */

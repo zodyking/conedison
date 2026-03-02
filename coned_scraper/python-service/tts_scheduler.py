@@ -39,7 +39,7 @@ class TTSScheduler:
             "start_time": "08:00",  # Active hours start
             "end_time": "21:00",  # Active hours end
             "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
-            "message_template": "{prefix} Your current balance is {balance}. Your last bill was {latest_bill_amount}, using {last_bill_kwh}, due {due_date}. Current usage: {current_usage_kwh} at {current_usage_cost}. Projected usage: {projected_usage_kwh} at {projected_usage_cost}.",
+            "message_template": "{prefix} Your current bill is {latest_bill_amount}, using {last_bill_kwh}, due {due_date}. Your account balance is {balance}. Current usage: {current_usage_kwh} at {current_usage_cost}. Projected usage: {projected_usage_kwh} at {projected_usage_cost}.",
             "current_usage_sensor": "",  # HA sensor entity for current kWh usage
             "future_usage_sensor": "",  # HA sensor entity for projected kWh usage
             "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}

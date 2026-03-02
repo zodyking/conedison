@@ -362,7 +362,7 @@ const schedule = reactive({
   start_time: '08:00',
   end_time: '21:00',
   days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
-  message_template: '{prefix} Your current balance is {balance}. Your last bill was {latest_bill_amount}, using {last_bill_kwh}, due {due_date}. Current usage: {current_usage_kwh} at {current_usage_cost}. Projected usage: {projected_usage_kwh} at {projected_usage_cost}.',
+  message_template: '{prefix} Your current bill is {latest_bill_amount}, using {last_bill_kwh}, due {due_date}. Your account balance is {balance}. Current usage: {current_usage_kwh} at {current_usage_cost}. Projected usage: {projected_usage_kwh} at {projected_usage_cost}.',
   current_usage_sensor: '',
   future_usage_sensor: ''
 })
