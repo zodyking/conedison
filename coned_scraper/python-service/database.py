@@ -1,9 +1,12 @@
 import sqlite3
 import json
 import logging
+import time
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from contextlib import contextmanager
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -16,18 +19,58 @@ def utc_now_iso() -> str:
 from data_config import DATA_DIR
 DB_PATH = DATA_DIR / "scraper.db"
 
-def get_connection():
-    """Get database connection with row factory"""
-    conn = sqlite3.connect(DB_PATH)
+# Thread-local storage for connections
+_local = threading.local()
+
+# Database lock for write operations
+_db_write_lock = threading.Lock()
+
+def get_connection(timeout: float = 30.0):
+    """Get database connection with row factory, WAL mode, and timeout"""
+    conn = sqlite3.connect(DB_PATH, timeout=timeout, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
+
+@contextmanager
+def get_db_connection(timeout: float = 30.0):
+    """Context manager for database connections with automatic cleanup"""
+    conn = get_connection(timeout)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+def execute_with_retry(func, max_retries: int = 5, base_delay: float = 0.1):
+    """Execute a database function with retry on locked errors"""
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) or "locked" in str(e).lower():
+                last_error = e
+                delay = base_delay * (2 ** attempt)
+                logger.warning(f"Database locked, retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+            else:
+                raise
+    logger.error(f"Database operation failed after {max_retries} retries: {last_error}")
+    raise last_error
 
 def init_database():
     """Initialize SQLite database with normalized schema"""
     DB_PATH.parent.mkdir(exist_ok=True)
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
+    
+    # Enable WAL mode for better concurrency
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.execute("PRAGMA synchronous=NORMAL")
     
     # ==========================================
     # LEGACY TABLES (keep for backward compat)
@@ -1750,7 +1793,7 @@ def get_ledger_data() -> Dict[str, Any]:
 
 def save_scraped_data(data: Dict[str, Any], status: str = "success", error_message: Optional[str] = None, screenshot_path: Optional[str] = None):
     """Save scraped data to database. Also syncs to normalized tables."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     
     timestamp = utc_now_iso()
@@ -1794,7 +1837,7 @@ def save_scraped_data(data: Dict[str, Any], status: str = "success", error_messa
 
 def get_latest_scraped_data(limit: int = 1) -> List[Dict[str, Any]]:
     """Get latest scraped data"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -1829,7 +1872,7 @@ def get_latest_scraped_data(limit: int = 1) -> List[Dict[str, Any]]:
 
 def get_all_scraped_data(limit: int = 100) -> List[Dict[str, Any]]:
     """Get all scraped data"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -1863,21 +1906,24 @@ def get_all_scraped_data(limit: int = 100) -> List[Dict[str, Any]]:
     return result
 
 def add_log(level: str, message: str):
-    """Add log entry"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    """Add log entry with retry logic"""
+    def _do_log():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO logs (timestamp, level, message)
+                VALUES (?, ?, ?)
+            ''', (utc_now_iso(), level, message))
+            conn.commit()
     
-    cursor.execute('''
-        INSERT INTO logs (timestamp, level, message)
-        VALUES (?, ?, ?)
-    ''', (utc_now_iso(), level, message))
-    
-    conn.commit()
-    conn.close()
+    try:
+        execute_with_retry(_do_log, max_retries=3, base_delay=0.05)
+    except Exception as e:
+        logger.warning(f"Failed to add log to database: {e}")
 
 def get_logs(limit: int = 100) -> List[Dict[str, Any]]:
     """Get log entries"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -1894,7 +1940,7 @@ def get_logs(limit: int = 100) -> List[Dict[str, Any]]:
 
 def clear_logs():
     """Clear all log entries"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM logs')
     conn.commit()
@@ -1902,7 +1948,7 @@ def clear_logs():
 
 def add_scrape_history(success: bool, error_message: Optional[str] = None, failure_step: Optional[str] = None, duration_seconds: Optional[float] = None):
     """Add scrape history entry"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -1924,7 +1970,7 @@ def add_scrape_history(success: bool, error_message: Optional[str] = None, failu
 
 def get_scrape_history(limit: int = 50) -> List[Dict[str, Any]]:
     """Get scrape history entries"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -1953,26 +1999,28 @@ def get_scrape_history(limit: int = 50) -> List[Dict[str, Any]]:
 
 def get_app_setting(key: str) -> Optional[str]:
     """Get a setting value from the database"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT value FROM app_settings WHERE key = ?', (key,))
-    row = cursor.fetchone()
-    conn.close()
-    return row['value'] if row else None
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT value FROM app_settings WHERE key = ?', (key,))
+        row = cursor.fetchone()
+        return row['value'] if row else None
 
 
 def set_app_setting(key: str, value: str):
-    """Set a setting value in the database"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    timestamp = utc_now_iso()
-    cursor.execute('''
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    ''', (key, value, timestamp))
-    conn.commit()
-    conn.close()
+    """Set a setting value in the database with retry logic"""
+    def _do_set():
+        with _db_write_lock:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                timestamp = utc_now_iso()
+                cursor.execute('''
+                    INSERT INTO app_settings (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                ''', (key, value, timestamp))
+                conn.commit()
+    
+    execute_with_retry(_do_set)
 
 
 def get_tts_config_db() -> Optional[Dict[str, Any]]:
