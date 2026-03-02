@@ -66,6 +66,8 @@ SETTINGS_FILE = DATA_DIR / "app_settings.json"
 IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
 TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
+TTS_PAYMENT_STATE_FILE = DATA_DIR / "tts_payment_state.json"
+TTS_BILL_STATE_FILE = DATA_DIR / "tts_bill_state.json"
 KEY_FILE = DATA_DIR / ".key"
 
 # Default TTS settings (like Home-Energy)
@@ -197,21 +199,11 @@ async def run_scheduled_scrape():
                     if len(bills) >= 2:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     
-                    # Smart last payment detection: only publish when payment count increased
+                    # Smart last payment detection for MQTT only
                     should_pub, last_payment, reason = should_publish_last_payment()
                     if should_pub and last_payment:
                         add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
-                        
-                        # Trigger TTS for new payment (scheduled scrape)
-                        try:
-                            from tts_scheduler import trigger_payment_received_tts
-                            payment_amount = last_payment.get("amount", "")
-                            current_balance = scraped_data.get("account_balance", "")
-                            payee_name = last_payment.get("payee_name", "")
-                            await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
-                        except Exception as tts_e:
-                            add_log("warning", f"Failed to trigger payment TTS: {tts_e}")
                     else:
                         add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
@@ -237,6 +229,41 @@ async def run_scheduled_scrape():
                             add_log("info", "Published payee summary to MQTT")
                 except Exception as e:
                     add_log("warning", f"Failed to publish payee summary: {e}")
+            
+            # ==========================================
+            # INDEPENDENT TTS TRIGGERS (not tied to MQTT)
+            # ==========================================
+            
+            # Check for new payment TTS trigger
+            try:
+                tts_payment_trigger, tts_payment_data, tts_payment_reason = should_trigger_payment_tts()
+                if tts_payment_trigger and tts_payment_data:
+                    add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
+                    from tts_scheduler import trigger_payment_received_tts
+                    payment_amount = tts_payment_data.get("amount", "")
+                    current_balance = scraped_data.get("account_balance", "")
+                    payee_name = tts_payment_data.get("payee_name", "")
+                    await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
+                else:
+                    add_log("debug", f"No payment TTS: {tts_payment_reason}")
+            except Exception as tts_e:
+                add_log("warning", f"Failed to check/trigger payment TTS: {tts_e}")
+            
+            # Check for new bill TTS trigger
+            try:
+                tts_bill_trigger, tts_bill_data, tts_bill_reason = should_trigger_new_bill_tts()
+                if tts_bill_trigger and tts_bill_data:
+                    add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
+                    from tts_scheduler import trigger_new_bill_tts
+                    await trigger_new_bill_tts(
+                        month_range=tts_bill_data.get("month_range", ""),
+                        amount=tts_bill_data.get("bill_total", ""),
+                        due_date=tts_bill_data.get("due_date", "")
+                    )
+                else:
+                    add_log("debug", f"No bill TTS: {tts_bill_reason}")
+            except Exception as tts_e:
+                add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
         
         # Check IMAP for payment attribution if configured
         if success:
@@ -587,6 +614,178 @@ def should_publish_last_payment() -> tuple:
     
     return should_publish, latest_payment, reason
 
+
+# ==========================================
+# INDEPENDENT TTS TRIGGER DETECTION
+# These functions detect changes independently of MQTT
+# ==========================================
+
+def load_tts_payment_state() -> dict:
+    """Load the last known payment state for TTS trigger detection"""
+    if not TTS_PAYMENT_STATE_FILE.exists():
+        return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
+    try:
+        return json.loads(TTS_PAYMENT_STATE_FILE.read_text())
+    except Exception as e:
+        add_log("warning", f"Failed to load TTS payment state: {str(e)}")
+        return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
+
+def save_tts_payment_state(state: dict):
+    """Save the TTS payment state"""
+    try:
+        TTS_PAYMENT_STATE_FILE.write_text(json.dumps(state))
+    except Exception as e:
+        add_log("warning", f"Failed to save TTS payment state: {str(e)}")
+
+def load_tts_bill_state() -> dict:
+    """Load the last known bill state for TTS trigger detection"""
+    if not TTS_BILL_STATE_FILE.exists():
+        return {"latest_bill_id": None, "bill_total": None}
+    try:
+        return json.loads(TTS_BILL_STATE_FILE.read_text())
+    except Exception as e:
+        add_log("warning", f"Failed to load TTS bill state: {str(e)}")
+        return {"latest_bill_id": None, "bill_total": None}
+
+def save_tts_bill_state(state: dict):
+    """Save the TTS bill state"""
+    try:
+        TTS_BILL_STATE_FILE.write_text(json.dumps(state))
+    except Exception as e:
+        add_log("warning", f"Failed to save TTS bill state: {str(e)}")
+
+def should_trigger_payment_tts() -> tuple:
+    """
+    Check if we should trigger TTS for a new payment.
+    Independent of MQTT - uses its own state file.
+    
+    Returns (should_trigger: bool, payment_data: dict or None, reason: str)
+    
+    Triggers when:
+    1. New payment added to the most recent bill (payment count increased)
+    2. First time seeing a payment (no previous state)
+    
+    Does NOT trigger for:
+    - Payee changes only
+    - Bill cycle changes without new payments
+    - Reordering existing payments
+    """
+    from database import get_most_recent_bill_payment_count, get_latest_payment
+    
+    current_state = get_most_recent_bill_payment_count()
+    previous_state = load_tts_payment_state()
+    
+    current_bill_id = current_state.get("bill_id")
+    current_count = current_state.get("payment_count", 0)
+    
+    # Get the latest payment on the most recent bill
+    latest_payment = get_latest_payment()
+    
+    previous_bill_id = previous_state.get("bill_id")
+    previous_count = previous_state.get("payment_count", 0)
+    previous_last_payment_id = previous_state.get("last_payment_id")
+    
+    should_trigger = False
+    reason = ""
+    
+    # No payments at all
+    if not latest_payment:
+        # Update state but don't trigger
+        new_state = {
+            "bill_id": current_bill_id,
+            "payment_count": 0,
+            "last_payment_id": None
+        }
+        save_tts_payment_state(new_state)
+        return False, None, "No payments found"
+    
+    current_last_id = latest_payment.get("id")
+    
+    # Case 1: Same bill, payment count increased = new payment added
+    if current_bill_id == previous_bill_id and current_count > previous_count:
+        should_trigger = True
+        reason = f"New payment added (count: {previous_count} -> {current_count})"
+    
+    # Case 2: New billing cycle with payments - only trigger if there's a NEW payment
+    # (not just carrying over from last scrape)
+    elif current_bill_id != previous_bill_id:
+        # Only trigger if the latest payment ID is different from what we saw before
+        # This means a new payment was actually added, not just a bill cycle change
+        if current_last_id != previous_last_payment_id and current_count > 0:
+            should_trigger = True
+            reason = f"New payment in new billing cycle"
+    
+    # Case 3: First time with state - don't trigger to avoid false positives on first run
+    # (User may have existing payments we shouldn't announce)
+    
+    # Update state
+    new_state = {
+        "bill_id": current_bill_id,
+        "payment_count": current_count,
+        "last_payment_id": current_last_id
+    }
+    save_tts_payment_state(new_state)
+    
+    return should_trigger, latest_payment if should_trigger else None, reason
+
+def should_trigger_new_bill_tts() -> tuple:
+    """
+    Check if we should trigger TTS for a new bill.
+    Independent of MQTT - uses its own state file.
+    
+    Returns (should_trigger: bool, bill_data: dict or None, reason: str)
+    
+    Triggers when:
+    1. A new bill appears (different bill_id as latest)
+    2. First time seeing any bill (no previous state) - SKIP to avoid false positive
+    
+    Does NOT trigger for:
+    - Same bill with updated amounts
+    - Payment changes
+    """
+    from database import get_all_bills, get_bill_details_by_id
+    
+    all_bills = get_all_bills()
+    previous_state = load_tts_bill_state()
+    
+    if not all_bills or len(all_bills) == 0:
+        return False, None, "No bills found"
+    
+    latest_bill = all_bills[0]
+    current_bill_id = latest_bill.get("id")
+    previous_bill_id = previous_state.get("latest_bill_id")
+    
+    should_trigger = False
+    reason = ""
+    bill_data = None
+    
+    # Case 1: New bill detected (different ID)
+    if previous_bill_id is not None and current_bill_id != previous_bill_id:
+        should_trigger = True
+        reason = f"New bill detected (ID: {current_bill_id})"
+        
+        # Get bill details for TTS
+        bill_details = get_bill_details_by_id(current_bill_id)
+        bill_data = {
+            "month_range": latest_bill.get("month_range", ""),
+            "bill_total": latest_bill.get("bill_total", ""),
+            "amount_numeric": latest_bill.get("amount_numeric"),
+            "due_date": bill_details.get("due_date", "") if bill_details else "",
+        }
+    
+    # Case 2: First time - just initialize state, don't trigger
+    # (Avoid announcing existing bills on first run)
+    
+    # Update state
+    new_state = {
+        "latest_bill_id": current_bill_id,
+        "bill_total": latest_bill.get("bill_total")
+    }
+    save_tts_bill_state(new_state)
+    
+    return should_trigger, bill_data, reason
+
+
 def save_app_settings(settings: dict):
     """Save app settings (time offset, password) to file"""
     settings_data = {
@@ -776,21 +975,11 @@ async def start_scraper():
                     if len(bills) >= 2:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     
-                    # Smart last payment detection: only publish when payment count increased
+                    # Smart last payment detection for MQTT only
                     should_pub, last_payment, reason = should_publish_last_payment()
                     if should_pub and last_payment:
                         add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
-                        
-                        # Trigger TTS for new payment (manual scrape)
-                        try:
-                            from tts_scheduler import trigger_payment_received_tts
-                            payment_amount = last_payment.get("amount", "")
-                            current_balance = scraped_data.get("account_balance", "")
-                            payee_name = last_payment.get("payee_name", "")
-                            await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
-                        except Exception as tts_e:
-                            add_log("warning", f"Failed to trigger payment TTS: {tts_e}")
                     else:
                         add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
@@ -816,6 +1005,41 @@ async def start_scraper():
                             add_log("info", "Published payee summary to MQTT")
                 except Exception as e:
                     add_log("warning", f"Failed to publish payee summary: {e}")
+            
+            # ==========================================
+            # INDEPENDENT TTS TRIGGERS (not tied to MQTT)
+            # ==========================================
+            
+            # Check for new payment TTS trigger
+            try:
+                tts_payment_trigger, tts_payment_data, tts_payment_reason = should_trigger_payment_tts()
+                if tts_payment_trigger and tts_payment_data:
+                    add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
+                    from tts_scheduler import trigger_payment_received_tts
+                    payment_amount = tts_payment_data.get("amount", "")
+                    current_balance = scraped_data.get("account_balance", "")
+                    payee_name = tts_payment_data.get("payee_name", "")
+                    await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
+                else:
+                    add_log("debug", f"No payment TTS: {tts_payment_reason}")
+            except Exception as tts_e:
+                add_log("warning", f"Failed to check/trigger payment TTS: {tts_e}")
+            
+            # Check for new bill TTS trigger
+            try:
+                tts_bill_trigger, tts_bill_data, tts_bill_reason = should_trigger_new_bill_tts()
+                if tts_bill_trigger and tts_bill_data:
+                    add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
+                    from tts_scheduler import trigger_new_bill_tts
+                    await trigger_new_bill_tts(
+                        month_range=tts_bill_data.get("month_range", ""),
+                        amount=tts_bill_data.get("bill_total", ""),
+                        due_date=tts_bill_data.get("due_date", "")
+                    )
+                else:
+                    add_log("debug", f"No bill TTS: {tts_bill_reason}")
+            except Exception as tts_e:
+                add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
         
         duration = time_module.time() - start_time
         add_scrape_history(success, None if success else "Scrape failed", None, duration)
