@@ -752,16 +752,16 @@ onUnmounted(() => clearInterval(interval))
   font-size: 1.1rem;
 }
 
-/* Account Balance - Con Edison Blue */
+/* Account Balance - Blue matching header */
 .ha-balance-box {
-  background: #f5fafd;
-  border: 1px solid #0078c1;
+  background: #f0f9ff;
+  border: 1px solid #0088cc;
 }
 .ha-balance-box .ha-summary-label {
-  color: #005a8f;
+  color: #006699;
 }
 .ha-balance-text {
-  color: #0078c1;
+  color: #0088cc;
   font-weight: 700;
   font-size: 1.25rem;
 }
@@ -780,7 +780,7 @@ onUnmounted(() => clearInterval(interval))
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0.75rem;
-  background: linear-gradient(135deg, #f37321 0%, #ff8c42 100%);
+  background: linear-gradient(135deg, #0088cc 0%, #00a3e0 100%);
   color: white;
 }
 
@@ -822,7 +822,7 @@ onUnmounted(() => clearInterval(interval))
 .ha-stat-value {
   font-size: 1rem;
   font-weight: 700;
-  color: #0078c1;
+  color: #0088cc;
 }
 
 .ha-stat-unit {
@@ -831,17 +831,17 @@ onUnmounted(() => clearInterval(interval))
   color: #888;
 }
 
-/* Projected items - slightly different style */
+/* Projected items - same blue style */
 .ha-stat-projected {
-  background: #fef9f5;
+  background: #f0f9ff;
 }
 
 .ha-stat-projected .ha-stat-label {
-  color: #c55a1a;
+  color: #006699;
 }
 
 .ha-stat-projected .ha-stat-value {
-  color: #f37321;
+  color: #0088cc;
 }
 
 /* Responsive adjustments */

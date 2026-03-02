@@ -160,6 +160,7 @@
                 <th>Delivery</th>
                 <th>Delivery Rate</th>
                 <th>Cycle Total</th>
+                <th>Roll-over Balance</th>
                 <th>Bill Total</th>
               </tr>
             </thead>
@@ -173,6 +174,7 @@
                 <td>{{ row.delivery_total ? `$${row.delivery_total.toFixed(2)}` : '—' }}</td>
                 <td>{{ row.delivery_rate ? `$${row.delivery_rate.toFixed(4)}` : '—' }}</td>
                 <td>{{ row.total_from_billing_period ? `$${row.total_from_billing_period.toFixed(2)}` : (row.electricity_total ? `$${row.electricity_total.toFixed(2)}` : '—') }}</td>
+                <td>{{ row.balance_from_previous_bill ? `$${row.balance_from_previous_bill.toFixed(2)}` : '$0.00' }}</td>
                 <td class="ha-total-cell">{{ formatBillTotal(row) }}</td>
               </tr>
             </tbody>
