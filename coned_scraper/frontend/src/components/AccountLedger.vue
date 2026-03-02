@@ -54,6 +54,7 @@
           <span>Account Summary</span>
         </div>
         <div class="ha-card-content ha-summary-content">
+          <!-- Account Overview Row -->
           <div class="ha-summary-row ha-summary-row-two">
             <div class="ha-summary-box ha-balance-box">
               <div class="ha-summary-label">Account Balance</div>
@@ -64,40 +65,36 @@
               <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
             </div>
           </div>
-          <!-- Section Divider for Current Billing Period -->
-          <div class="ha-section-divider" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
-            <span class="ha-section-label">Current Billing Period Statistics</span>
-          </div>
-          <!-- Billing Period Start/End Dates Row -->
-          <div class="ha-summary-row ha-summary-row-two" v-if="meterData?.enabled && meterData?.forecast?.start_date">
-            <div class="ha-summary-box ha-billing-date-box">
-              <div class="ha-summary-label">Billing Start Date</div>
-              <div class="ha-summary-value ha-billing-date-value">{{ formatBillingDate(meterData.forecast.start_date) }}</div>
+          
+          <!-- Current Billing Period Section -->
+          <div class="ha-billing-section" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
+            <div class="ha-section-header">
+              <span class="ha-section-title">Current Billing Period</span>
+              <span class="ha-section-dates" v-if="meterData?.forecast?.start_date">
+                {{ formatShortDate(meterData.forecast.start_date) }} — {{ formatShortDate(meterData.forecast.end_date) }}
+              </span>
             </div>
-            <div class="ha-summary-box ha-billing-date-box">
-              <div class="ha-summary-label">Billing End Date</div>
-              <div class="ha-summary-value ha-billing-date-value">{{ formatBillingDate(meterData.forecast.end_date) }}</div>
-            </div>
-          </div>
-          <!-- Meter Tracking Row - All 4 fields inline -->
-          <div class="ha-summary-row ha-summary-row-four" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
-            <div class="ha-summary-box-compact ha-meter-highlight">
-              <div class="ha-summary-label-sm">Current Usage</div>
-              <div class="ha-summary-value-sm ha-meter-highlight-value">{{ meterData.forecast.usage_to_date }} kWh</div>
-            </div>
-            <div class="ha-summary-box-compact ha-cost-highlight">
-              <div class="ha-summary-label-sm">Current Cost</div>
-              <div class="ha-summary-value-sm ha-cost-highlight-value">${{ meterData.usage_to_date_cost?.toFixed(2) || '—' }}</div>
-            </div>
-            <div class="ha-summary-box-compact ha-projected-highlight">
-              <div class="ha-summary-label-sm">Projected Usage</div>
-              <div class="ha-summary-value-sm ha-projected-highlight-value">{{ meterData.forecast.forecasted_usage }} kWh</div>
-            </div>
-            <div class="ha-summary-box-compact ha-projected-cost-highlight">
-              <div class="ha-summary-label-sm">Projected Bill</div>
-              <div class="ha-summary-value-sm ha-projected-cost-value">${{ projectedBillCost }}</div>
+            
+            <div class="ha-stats-grid">
+              <div class="ha-stat-item">
+                <div class="ha-stat-label">Usage to Date</div>
+                <div class="ha-stat-value">{{ meterData.forecast.usage_to_date }} <span class="ha-stat-unit">kWh</span></div>
+              </div>
+              <div class="ha-stat-item">
+                <div class="ha-stat-label">Cost to Date</div>
+                <div class="ha-stat-value">${{ meterData.usage_to_date_cost?.toFixed(2) || '—' }}</div>
+              </div>
+              <div class="ha-stat-item ha-stat-projected">
+                <div class="ha-stat-label">Projected Usage</div>
+                <div class="ha-stat-value">{{ meterData.forecast.forecasted_usage }} <span class="ha-stat-unit">kWh</span></div>
+              </div>
+              <div class="ha-stat-item ha-stat-projected">
+                <div class="ha-stat-label">Projected Bill</div>
+                <div class="ha-stat-value">${{ projectedBillCost }}</div>
+              </div>
             </div>
           </div>
+          
           <div class="ha-summary-actions">
             <button
               class="ha-summary-btn"
@@ -385,6 +382,19 @@ function formatBillingDate(dateStr: string | null): string {
       month: 'long', 
       day: 'numeric', 
       year: 'numeric' 
+    })
+  } catch {
+    return dateStr
+  }
+}
+
+function formatShortDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const date = new Date(dateStr + 'T00:00:00')
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric' 
     })
   } catch {
     return dateStr
@@ -728,204 +738,140 @@ onUnmounted(() => clearInterval(interval))
 .ha-no-bills-title { font-size: 1.25rem; font-weight: 600; color: #333; margin-bottom: 1rem; }
 .ha-no-bills-desc { color: #666; font-size: 1rem; max-width: 500px; line-height: 1.6; margin-bottom: 1.5rem; }
 
-/* Due Date in Summary */
+/* Due Date in Summary - Con Edison Orange */
 .ha-due-box {
-  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  background: #fff8f3;
+  border: 1px solid #f37321;
+}
+.ha-due-box .ha-summary-label {
+  color: #c55a1a;
 }
 .ha-due-text {
-  color: #e65100;
+  color: #f37321;
   font-weight: 700;
   font-size: 1.1rem;
 }
 
-/* Meter Tracking Boxes - Blue style matching header */
-.ha-meter-highlight {
-  background: transparent;
-  border: 2px solid #0088cc;
+/* Account Balance - Con Edison Blue */
+.ha-balance-box {
+  background: #f5fafd;
+  border: 1px solid #0078c1;
+}
+.ha-balance-box .ha-summary-label {
+  color: #005a8f;
+}
+.ha-balance-text {
+  color: #0078c1;
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+/* Current Billing Period Section */
+.ha-billing-section {
+  margin-top: 0.75rem;
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
   border-radius: 8px;
-}
-.ha-meter-highlight .ha-summary-label {
-  color: #0088cc;
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.5px;
-}
-.ha-meter-highlight-value {
-  color: #005fa3;
-  font-weight: 800;
-  font-size: 1.4rem;
-}
-.ha-cost-highlight {
-  background: transparent;
-  border: 2px solid #0088cc;
-  border-radius: 8px;
-}
-.ha-cost-highlight .ha-summary-label {
-  color: #0088cc;
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.5px;
-}
-.ha-cost-highlight-value {
-  color: #005fa3;
-  font-weight: 800;
-  font-size: 1.4rem;
-}
-
-/* Four-column row for meter data */
-.ha-summary-row-four {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.5rem;
-}
-
-.ha-summary-box-compact {
-  padding: 0.5rem;
-  border-radius: 6px;
-  text-align: center;
-  min-width: 0;
-}
-
-.ha-summary-label-sm {
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 0.15rem;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.ha-summary-value-sm {
-  font-weight: 700;
-  font-size: 0.95rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Compact meter highlight boxes */
-.ha-summary-box-compact.ha-meter-highlight,
-.ha-summary-box-compact.ha-cost-highlight {
-  border-width: 1.5px;
-}
-
-.ha-summary-box-compact.ha-meter-highlight .ha-summary-label-sm,
-.ha-summary-box-compact.ha-cost-highlight .ha-summary-label-sm {
-  color: #0088cc;
-  font-weight: 600;
-}
-
-.ha-summary-box-compact .ha-meter-highlight-value,
-.ha-summary-box-compact .ha-cost-highlight-value {
-  font-size: 0.95rem;
-}
-
-/* Projected usage/bill highlights - purple theme */
-.ha-projected-highlight {
-  background: transparent;
-  border: 1.5px solid #7b1fa2;
-  border-radius: 6px;
-}
-
-.ha-projected-highlight .ha-summary-label-sm {
-  color: #7b1fa2;
-  font-weight: 600;
-}
-
-.ha-projected-highlight-value {
-  color: #4a148c;
-  font-weight: 700;
-  font-size: 0.95rem;
-}
-
-.ha-projected-cost-highlight {
-  background: transparent;
-  border: 1.5px solid #7b1fa2;
-  border-radius: 6px;
-}
-
-.ha-projected-cost-highlight .ha-summary-label-sm {
-  color: #7b1fa2;
-  font-weight: 600;
-}
-
-.ha-projected-cost-value {
-  color: #4a148c;
-  font-weight: 700;
-  font-size: 0.95rem;
-}
-
-/* Section divider for current billing period */
-.ha-section-divider {
+.ha-section-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin: 0.75rem 0 0.5rem;
-  padding: 0.5rem 0;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, #f37321 0%, #ff8c42 100%);
+  color: white;
 }
 
-.ha-section-label {
-  font-size: 0.75rem;
+.ha-section-title {
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.ha-section-dates {
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.95;
+}
+
+/* Stats Grid */
+.ha-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: #e5e5e5;
+}
+
+.ha-stat-item {
+  background: white;
+  padding: 0.6rem 0.5rem;
+  text-align: center;
+}
+
+.ha-stat-label {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
   color: #666;
-  background: #f5f5f5;
-  padding: 0.35rem 1rem;
-  border-radius: 12px;
-  border: 1px solid #e0e0e0;
+  margin-bottom: 0.2rem;
 }
 
-/* Billing date boxes */
-.ha-billing-date-box {
-  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+.ha-stat-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0078c1;
 }
 
-.ha-billing-date-value {
-  color: #6a1b9a;
-  font-weight: 600;
-  font-size: 0.9rem;
+.ha-stat-unit {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #888;
 }
 
-/* Responsive adjustments for 4-column layout */
+/* Projected items - slightly different style */
+.ha-stat-projected {
+  background: #fef9f5;
+}
+
+.ha-stat-projected .ha-stat-label {
+  color: #c55a1a;
+}
+
+.ha-stat-projected .ha-stat-value {
+  color: #f37321;
+}
+
+/* Responsive adjustments */
 @media (max-width: 600px) {
-  .ha-summary-row-four {
+  .ha-stats-grid {
     grid-template-columns: repeat(2, 1fr);
   }
   
-  .ha-summary-label-sm {
-    font-size: 0.55rem;
+  .ha-stat-value {
+    font-size: 0.9rem;
   }
   
-  .ha-summary-value-sm {
-    font-size: 0.85rem;
-  }
-  
-  .ha-billing-date-value {
-    font-size: 0.8rem;
-  }
-  
-  .ha-section-label {
-    font-size: 0.65rem;
-    padding: 0.3rem 0.75rem;
+  .ha-section-header {
+    flex-direction: column;
+    gap: 0.2rem;
+    text-align: center;
   }
 }
 
 @media (max-width: 400px) {
-  .ha-summary-row-four {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.35rem;
+  .ha-stat-item {
+    padding: 0.5rem 0.3rem;
   }
   
-  .ha-summary-box-compact {
-    padding: 0.4rem;
+  .ha-stat-value {
+    font-size: 0.85rem;
   }
   
-  .ha-summary-value-sm {
-    font-size: 0.8rem;
+  .ha-stat-label {
+    font-size: 0.5rem;
   }
 }
 
