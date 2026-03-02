@@ -137,22 +137,27 @@ body {
   flex-direction: column;
   gap: 0.75rem;
   height: 100%;
+  max-height: 100%;
   min-height: 0;
   padding: 1rem;
+  overflow: hidden;
 }
 
 .ha-panels-grid {
   flex: 1;
   min-height: 0;
+  max-height: 100%;
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr;
   gap: 1rem;
+  overflow: hidden;
 }
 
 .ha-panels-grid > .ha-card {
   min-height: 0;
-  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 @media (max-width: 1024px) {
@@ -311,6 +316,8 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 /* Browser Preview Card */
@@ -320,6 +327,8 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .ha-log-container {
@@ -332,12 +341,14 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  max-height: 100%;
 }
 
 .ha-preview-container {
   background: #1a1a1a;
   flex: 1;
   min-height: 0;
+  max-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
