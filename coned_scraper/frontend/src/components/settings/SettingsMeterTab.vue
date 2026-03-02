@@ -58,19 +58,68 @@
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
 
       <div v-if="lastReading" class="ha-reading-info">
-        <div class="ha-reading-header">Latest Reading</div>
+        <div class="ha-reading-header">Latest Reading (Hourly Data)</div>
         <div class="ha-reading-row">
           <span class="ha-reading-label">Usage:</span>
-          <span class="ha-reading-value">{{ lastReading.value }} {{ lastReading.unit }}</span>
+          <span class="ha-reading-value">{{ lastReading.value?.toFixed(3) }} {{ lastReading.unit }}</span>
         </div>
         <div v-if="lastReadingCost !== null" class="ha-reading-row">
           <span class="ha-reading-label">Estimated Cost:</span>
           <span class="ha-reading-value">${{ lastReadingCost.toFixed(2) }}</span>
         </div>
         <div class="ha-reading-row">
+          <span class="ha-reading-label">Data From:</span>
+          <span class="ha-reading-value ha-reading-time">{{ formatTime(lastReading.end_time) }}</span>
+        </div>
+        <div class="ha-reading-row">
           <span class="ha-reading-label">Fetched:</span>
           <span class="ha-reading-value ha-reading-time">{{ formatTime(lastReading.fetched_at) }}</span>
         </div>
+      </div>
+
+      <div v-if="accountInfo" class="ha-reading-info">
+        <div class="ha-reading-header">Account Info</div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Account ID:</span>
+          <span class="ha-reading-value">{{ accountInfo.utility_account_id }}</span>
+        </div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Meter Type:</span>
+          <span class="ha-reading-value">{{ accountInfo.meter_type }}</span>
+        </div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Resolution:</span>
+          <span class="ha-reading-value">{{ accountInfo.read_resolution }}</span>
+        </div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Realtime Access:</span>
+          <span class="ha-reading-value" :style="{ color: accountInfo.has_realtime_access ? '#4caf50' : '#ff9800' }">
+            {{ accountInfo.has_realtime_access ? 'Yes' : 'No (using hourly data)' }}
+          </span>
+        </div>
+      </div>
+
+      <div v-if="forecast" class="ha-reading-info">
+        <div class="ha-reading-header">Current Period Forecast</div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Period:</span>
+          <span class="ha-reading-value">{{ forecast.start_date }} to {{ forecast.end_date }}</span>
+        </div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Usage to Date:</span>
+          <span class="ha-reading-value">{{ forecast.usage_to_date }} {{ forecast.unit }}</span>
+        </div>
+        <div class="ha-reading-row">
+          <span class="ha-reading-label">Forecasted Usage:</span>
+          <span class="ha-reading-value">{{ forecast.forecasted_usage }} {{ forecast.unit }}</span>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <strong>About Smart Meters:</strong> Real-time data requires enrollment in Con Edison's 
+        smart meter program with real-time data sharing enabled. This addon uses hourly historical 
+        data from Opower (typically 1-24 hour delay) which is available to all smart meter customers.
+        Your meter resolution shows "QUARTER_HOUR" means you have a smart meter with 15-minute interval data.
       </div>
 
       <div class="mqtt-sensor-info">
@@ -108,6 +157,8 @@ const isLoading = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const lastReading = ref<MeterReading | null>(null)
 const lastReadingCost = ref<number | null>(null)
+const accountInfo = ref<any>(null)
+const forecast = ref<any>(null)
 
 function formatTime(isoString: string | null): string {
   if (!isoString) return '—'
@@ -183,6 +234,12 @@ async function handleTest() {
       message.value = { type: 'success', text: d.message }
       if (d.reading) {
         lastReading.value = d.reading
+      }
+      if (d.account_info) {
+        accountInfo.value = d.account_info
+      }
+      if (d.forecast) {
+        forecast.value = d.forecast
       }
       await loadReading()
     } else {
@@ -310,5 +367,18 @@ onMounted(() => {
   border-radius: 3px;
   font-family: monospace;
   font-size: 0.8rem;
+}
+.info-box {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  border-radius: 8px;
+  border-left: 4px solid #ff9800;
+  font-size: 0.85rem;
+  color: #5d4037;
+  line-height: 1.5;
+}
+.info-box strong {
+  color: #e65100;
 }
 </style>

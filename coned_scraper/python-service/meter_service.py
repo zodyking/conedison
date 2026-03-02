@@ -1,15 +1,19 @@
 """
-Meter Service for Real-Time Con Edison Meter Readings
+Meter Service for Con Edison Usage Readings
 
 Uses the opower library (https://github.com/tronikos/opower) to fetch
-real-time meter readings from Con Edison's Opower API.
+meter readings from Con Edison's Opower API.
 
 The opower library is the same one used by Home Assistant's official
 Opower integration and supports Con Edison with TOTP MFA.
+
+Note: This uses hourly historical data (typically delayed 1-24 hours)
+rather than true realtime data, which requires special smart meter
+enrollment with Con Edison.
 """
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
 import aiohttp
@@ -114,12 +118,18 @@ class MeterService:
         return self._accounts
     
     async def fetch_reading(self) -> Optional[Dict[str, Any]]:
-        """Fetch the latest meter reading from Con Edison (opower realtime API)."""
+        """Fetch the latest meter reading from Con Edison using hourly historical data.
+        
+        Uses opower's hourly usage API which provides data typically delayed 1-24 hours.
+        This is more reliable than realtime API which requires special smart meter enrollment.
+        """
         if not self.is_configured():
             logger.error("Meter not configured")
             return None
         
         try:
+            from opower import AggregateType
+            
             # Login if needed
             if not await self._login():
                 return None
@@ -130,28 +140,33 @@ class MeterService:
                 logger.error("No opower accounts found")
                 return None
             
-            # Get realtime usage for first electric account
+            # Get first electric account
             account = accounts[0]
             
-            # Check if utility supports realtime
-            if not self._opower.utility.supports_realtime_usage():
-                logger.warning("Con Edison doesn't support realtime usage in this account")
-                return None
+            # Fetch last 48 hours of hourly data to ensure we get recent readings
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(hours=48)
             
-            reads = await self._opower.async_get_realtime_usage_reads(account)
+            reads = await self._opower.async_get_cost_reads(
+                account,
+                AggregateType.HOUR,
+                start_date,
+                end_date
+            )
             
             if not reads:
-                logger.warning("No realtime readings available")
+                logger.warning("No hourly readings available")
                 return None
             
-            # Get the most recent reading
-            latest = reads[-1]  # Last entry is most recent
+            # Get the most recent reading (last in list)
+            latest = reads[-1]
             
             reading = {
                 'start_time': latest.start_time.isoformat() if latest.start_time else None,
                 'end_time': latest.end_time.isoformat() if latest.end_time else None,
                 'value': float(latest.consumption) if latest.consumption is not None else None,
                 'unit': 'kWh',
+                'data_type': 'hourly',
                 'fetched_at': datetime.now(timezone.utc).isoformat()
             }
             
@@ -162,11 +177,78 @@ class MeterService:
             from database import save_meter_reading_db
             save_meter_reading_db(reading)
             
-            logger.info(f"Meter reading fetched: {reading['value']} {reading['unit']}")
+            logger.info(f"Meter reading fetched: {reading['value']} {reading['unit']} (hourly data from {latest.end_time})")
             return reading
             
         except Exception as e:
             logger.error(f"Failed to fetch meter reading: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    async def fetch_forecast(self) -> Optional[Dict[str, Any]]:
+        """Fetch the current billing period forecast from Con Edison."""
+        if not self.is_configured():
+            return None
+        
+        try:
+            if not await self._login():
+                return None
+            
+            forecasts = await self._opower.async_get_forecast()
+            if not forecasts:
+                return None
+            
+            forecast = forecasts[0]
+            return {
+                'start_date': forecast.start_date.isoformat() if forecast.start_date else None,
+                'end_date': forecast.end_date.isoformat() if forecast.end_date else None,
+                'usage_to_date': forecast.usage_to_date,
+                'forecasted_usage': forecast.forecasted_usage,
+                'cost_to_date': forecast.cost_to_date,
+                'forecasted_cost': forecast.forecasted_cost,
+                'unit': str(forecast.unit_of_measure) if forecast.unit_of_measure else 'KWH'
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch forecast: {e}")
+            return None
+    
+    async def get_account_info(self) -> Optional[Dict[str, Any]]:
+        """Get account information including smart meter status."""
+        if not self.is_configured():
+            return None
+        
+        try:
+            if not await self._login():
+                return None
+            
+            accounts = await self._get_accounts()
+            if not accounts:
+                return None
+            
+            account = accounts[0]
+            
+            # Check realtime support
+            has_realtime = False
+            realtime_error = None
+            if self._opower.utility.supports_realtime_usage():
+                try:
+                    meters = await self._opower._async_get_meters(account)
+                    has_realtime = len(meters) > 0
+                except Exception as e:
+                    realtime_error = str(e)
+            
+            return {
+                'account_uuid': account.uuid,
+                'utility_account_id': account.utility_account_id,
+                'meter_type': str(account.meter_type) if account.meter_type else None,
+                'read_resolution': str(account.read_resolution) if account.read_resolution else None,
+                'has_realtime_access': has_realtime,
+                'realtime_error': realtime_error,
+                'customer_uuid': account.customer.uuid if account.customer else None
+            }
+        except Exception as e:
+            logger.error(f"Failed to get account info: {e}")
             return None
     
     def get_cached_reading(self) -> Optional[Dict[str, Any]]:

@@ -2428,34 +2428,48 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
 
 @app.post("/api/meter-config/test")
 async def test_meter_connection():
-    """Test meter connection by fetching a reading"""
+    """Test meter connection by fetching account info and a reading"""
     from database import get_meter_config_db
     from meter_service import get_meter_service
-    
+
     config = get_meter_config_db()
     if not config:
         raise HTTPException(status_code=400, detail="Meter not configured")
-    
+
     # Decrypt password
     if config.get('password'):
         try:
             config['password'] = decrypt_data(config['password'])
         except:
             raise HTTPException(status_code=400, detail="Failed to decrypt password")
-    
+
     service = get_meter_service()
     success = await service.initialize(config)
-    
+
     if not success:
         raise HTTPException(status_code=500, detail="Failed to initialize meter connection")
+
+    # Get account info first (includes smart meter status)
+    account_info = await service.get_account_info()
     
+    # Get forecast
+    forecast = await service.fetch_forecast()
+    
+    # Get latest reading
     reading = await service.fetch_reading()
-    
+
     if reading:
         return {
             "success": True,
-            "message": f"Connected! Current reading: {reading['value']} {reading['unit']}",
-            "reading": reading
+            "message": f"Connected! Latest reading: {reading['value']} {reading['unit']} (from {reading.get('end_time', 'unknown')})",
+            "reading": reading,
+            "account_info": account_info,
+            "forecast": forecast,
+            "smart_meter_info": {
+                "has_realtime": account_info.get('has_realtime_access', False) if account_info else False,
+                "resolution": account_info.get('read_resolution') if account_info else None,
+                "note": "Realtime data requires special smart meter enrollment with Con Edison. This addon uses hourly historical data (typically 1-24 hour delay)."
+            }
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to fetch meter reading")
