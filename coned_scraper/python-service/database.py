@@ -544,6 +544,7 @@ def get_bill_history_for_graph() -> List[Dict[str, Any]]:
             bd.kwh_cost,
             bd.electricity_total,
             bd.total_from_billing_period,
+            bd.balance_from_previous_bill,
             bd.billing_days,
             bd.supply_charges_json,
             bd.delivery_charges_json
@@ -556,17 +557,37 @@ def get_bill_history_for_graph() -> List[Dict[str, Any]]:
     results = []
     for row in rows:
         result = dict(row)
-        # Parse supply/delivery totals
+        kwh_used = result.get("kwh_used") or 0
+        
+        # Parse supply charges and calculate rate
         try:
             supply = json.loads(result.get("supply_charges_json") or "{}")
             result["supply_total"] = supply.get("total", 0)
+            # Calculate supply rate: total supply / kWh
+            if kwh_used > 0 and result["supply_total"]:
+                result["supply_rate"] = round(result["supply_total"] / kwh_used, 4)
+            else:
+                result["supply_rate"] = 0
         except:
             result["supply_total"] = 0
+            result["supply_rate"] = 0
+        
+        # Parse delivery charges and calculate rate
         try:
             delivery = json.loads(result.get("delivery_charges_json") or "{}")
             result["delivery_total"] = delivery.get("total", 0)
+            # Calculate delivery rate: total delivery / kWh
+            if kwh_used > 0 and result["delivery_total"]:
+                result["delivery_rate"] = round(result["delivery_total"] / kwh_used, 4)
+            else:
+                result["delivery_rate"] = 0
         except:
             result["delivery_total"] = 0
+            result["delivery_rate"] = 0
+        
+        # Ensure balance_from_previous_bill is set
+        if result.get("balance_from_previous_bill") is None:
+            result["balance_from_previous_bill"] = 0
         
         # Clean up
         if "supply_charges_json" in result:

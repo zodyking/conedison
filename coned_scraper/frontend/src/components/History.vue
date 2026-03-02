@@ -85,11 +85,11 @@
         </div>
       </div>
 
-      <!-- Supply vs Delivery Breakdown -->
+      <!-- Supply vs Delivery Rates ($/kWh) -->
       <div class="ha-chart-card">
         <div class="ha-chart-header">
           <span class="ha-chart-icon">🔌</span>
-          <span>Supply vs Delivery Charges</span>
+          <span>Supply vs Delivery Rates ($/kWh)</span>
         </div>
         <div class="ha-chart-container">
           <canvas ref="supplyDeliveryChart"></canvas>
@@ -110,7 +110,9 @@
                 <th>kWh</th>
                 <th>$/kWh</th>
                 <th>Supply</th>
+                <th>Supply Rate</th>
                 <th>Delivery</th>
+                <th>Delivery Rate</th>
                 <th>Total</th>
               </tr>
             </thead>
@@ -120,7 +122,9 @@
                 <td>{{ formatNumber(row.kwh_used) }}</td>
                 <td>{{ row.kwh_cost ? `$${row.kwh_cost.toFixed(4)}` : '—' }}</td>
                 <td>{{ row.supply_total ? `$${row.supply_total.toFixed(2)}` : '—' }}</td>
+                <td>{{ row.supply_rate ? `$${row.supply_rate.toFixed(4)}` : '—' }}</td>
                 <td>{{ row.delivery_total ? `$${row.delivery_total.toFixed(2)}` : '—' }}</td>
+                <td>{{ row.delivery_rate ? `$${row.delivery_rate.toFixed(4)}` : '—' }}</td>
                 <td class="ha-total-cell">{{ row.electricity_total ? `$${row.electricity_total.toFixed(2)}` : (row.bill_total || '—') }}</td>
               </tr>
             </tbody>
@@ -173,9 +177,12 @@ interface HistoryRow {
   kwh_cost: number | null
   electricity_total: number | null
   total_from_billing_period: number | null
+  balance_from_previous_bill: number
   billing_days: number | null
   supply_total: number
+  supply_rate: number
   delivery_total: number
+  delivery_rate: number
 }
 
 const isLoading = ref(true)
@@ -271,9 +278,12 @@ async function fetchHistory() {
         kwh_cost: details.kwh_cost || null,
         electricity_total: details.electricity_total || null,
         total_from_billing_period: details.total_from_billing_period || null,
+        balance_from_previous_bill: details.balance_from_previous_bill || 0,
         billing_days: details.billing_days || null,
         supply_total: details.supply_total || 0,
+        supply_rate: details.supply_rate || 0,
         delivery_total: details.delivery_total || 0,
+        delivery_rate: details.delivery_rate || 0,
       }
     })
   } catch (e: any) {
@@ -334,40 +344,52 @@ function createCharts() {
     }
   }
 
-  // Bill Total Chart
+  // Bill Total Chart - Stacked bar with current period + previous balance
   if (billChart.value) {
     const ctx = billChart.value.getContext('2d')
     if (ctx) {
       chartInstances.push(new Chart(ctx, {
-        type: 'line',
+        type: 'bar',
         data: {
           labels,
-          datasets: [{
-            label: 'Bill Total',
-            data: chartData.map(r => r.electricity_total || r.amount_numeric || 0),
-            borderColor: 'rgba(34, 139, 34, 1)',
-            backgroundColor: 'rgba(34, 139, 34, 0.1)',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 5,
-            pointBackgroundColor: 'rgba(34, 139, 34, 1)'
-          }]
+          datasets: [
+            {
+              label: 'Current Cycle',
+              data: chartData.map(r => r.total_from_billing_period || r.electricity_total || r.amount_numeric || 0),
+              backgroundColor: 'rgba(34, 139, 34, 0.7)',
+              borderColor: 'rgba(34, 139, 34, 1)',
+              borderWidth: 1,
+              borderRadius: 4
+            },
+            {
+              label: 'Previous Balance',
+              data: chartData.map(r => r.balance_from_previous_bill || 0),
+              backgroundColor: 'rgba(255, 99, 132, 0.7)',
+              borderColor: 'rgba(255, 99, 132, 1)',
+              borderWidth: 1,
+              borderRadius: 4
+            }
+          ]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: false },
+            legend: { position: 'top' },
             tooltip: {
               callbacks: {
-                label: (ctx) => `$${ctx.parsed.y.toFixed(2)}`
+                label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`
               }
             }
           },
           scales: {
             y: {
-              beginAtZero: false,
+              beginAtZero: true,
+              stacked: true,
               title: { display: true, text: 'USD ($)' }
+            },
+            x: {
+              stacked: true
             }
           }
         }
@@ -416,7 +438,7 @@ function createCharts() {
     }
   }
 
-  // Supply vs Delivery Chart
+  // Supply vs Delivery Rates Chart ($/kWh)
   if (supplyDeliveryChart.value) {
     const ctx = supplyDeliveryChart.value.getContext('2d')
     if (ctx) {
@@ -426,16 +448,16 @@ function createCharts() {
           labels,
           datasets: [
             {
-              label: 'Supply',
-              data: chartData.map(r => r.supply_total || 0),
+              label: 'Supply Rate',
+              data: chartData.map(r => r.supply_rate || 0),
               backgroundColor: 'rgba(255, 159, 64, 0.7)',
               borderColor: 'rgba(255, 159, 64, 1)',
               borderWidth: 1,
               borderRadius: 4
             },
             {
-              label: 'Delivery',
-              data: chartData.map(r => r.delivery_total || 0),
+              label: 'Delivery Rate',
+              data: chartData.map(r => r.delivery_rate || 0),
               backgroundColor: 'rgba(75, 192, 192, 0.7)',
               borderColor: 'rgba(75, 192, 192, 1)',
               borderWidth: 1,
@@ -450,7 +472,7 @@ function createCharts() {
             legend: { position: 'top' },
             tooltip: {
               callbacks: {
-                label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`
+                label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(4)}/kWh`
               }
             }
           },
@@ -458,7 +480,7 @@ function createCharts() {
             y: {
               beginAtZero: true,
               stacked: true,
-              title: { display: true, text: 'USD ($)' }
+              title: { display: true, text: '$/kWh' }
             },
             x: {
               stacked: true
