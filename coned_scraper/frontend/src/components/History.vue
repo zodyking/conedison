@@ -600,7 +600,17 @@ function createCharts() {
             legend: { position: 'top' },
             tooltip: {
               callbacks: {
-                label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`
+                title: (items) => items[0]?.label || '',
+                label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`,
+                afterBody: (items) => {
+                  if (!items.length) return ''
+                  const dataIndex = items[0].dataIndex
+                  const row = chartData[dataIndex]
+                  const cycleUsage = row.total_from_billing_period || row.electricity_total || row.amount_numeric || 0
+                  const rollover = row.balance_from_previous_bill || 0
+                  const totalBill = cycleUsage + rollover
+                  return `\nTotal Bill: $${totalBill.toFixed(2)}`
+                }
               }
             }
           },

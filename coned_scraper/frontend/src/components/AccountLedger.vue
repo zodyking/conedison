@@ -64,15 +64,30 @@
               <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
             </div>
           </div>
-          <!-- Meter Tracking Row -->
-          <div class="ha-summary-row ha-summary-row-two" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
-            <div class="ha-summary-box ha-meter-highlight">
-              <div class="ha-summary-label">Current Meter Usage</div>
-              <div class="ha-summary-value ha-meter-highlight-value">{{ meterData.forecast.usage_to_date }} kWh</div>
+          <!-- Meter Tracking Row - All 4 fields inline -->
+          <div class="ha-summary-row ha-summary-row-four" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
+            <div class="ha-summary-box-compact ha-meter-highlight">
+              <div class="ha-summary-label-sm">Current Usage</div>
+              <div class="ha-summary-value-sm ha-meter-highlight-value">{{ meterData.forecast.usage_to_date }} kWh</div>
             </div>
-            <div class="ha-summary-box ha-cost-highlight">
-              <div class="ha-summary-label">Current Usage Cost</div>
-              <div class="ha-summary-value ha-cost-highlight-value">${{ meterData.usage_to_date_cost?.toFixed(2) || '—' }}</div>
+            <div class="ha-summary-box-compact ha-cost-highlight">
+              <div class="ha-summary-label-sm">Current Cost</div>
+              <div class="ha-summary-value-sm ha-cost-highlight-value">${{ meterData.usage_to_date_cost?.toFixed(2) || '—' }}</div>
+            </div>
+            <div class="ha-summary-box-compact ha-projected-highlight">
+              <div class="ha-summary-label-sm">Projected Usage</div>
+              <div class="ha-summary-value-sm ha-projected-highlight-value">{{ meterData.forecast.forecasted_usage }} kWh</div>
+            </div>
+            <div class="ha-summary-box-compact ha-projected-cost-highlight">
+              <div class="ha-summary-label-sm">Projected Bill</div>
+              <div class="ha-summary-value-sm ha-projected-cost-value">${{ projectedBillCost }}</div>
+            </div>
+          </div>
+          <!-- Billing Period Row -->
+          <div class="ha-summary-row ha-billing-period-row" v-if="meterData?.enabled && meterData?.forecast?.start_date">
+            <div class="ha-billing-period-label">Billing Period:</div>
+            <div class="ha-billing-period-dates">
+              {{ formatBillingDate(meterData.forecast.start_date) }} — {{ formatBillingDate(meterData.forecast.end_date) }}
             </div>
           </div>
           <div class="ha-summary-actions">
@@ -346,6 +361,27 @@ interface MeterReadingData {
   kwh_cost: number | null
 }
 const meterData = ref<MeterReadingData | null>(null)
+
+const projectedBillCost = computed(() => {
+  if (!meterData.value?.forecast?.forecasted_usage || !meterData.value?.kwh_cost) return '—'
+  const cost = meterData.value.forecast.forecasted_usage * meterData.value.kwh_cost
+  return cost.toFixed(2)
+})
+
+function formatBillingDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const date = new Date(dateStr + 'T00:00:00')
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      month: 'long', 
+      day: 'numeric', 
+      year: 'numeric' 
+    })
+  } catch {
+    return dateStr
+  }
+}
 
 function toggleBillExpanded(billId: number) {
   if (expandedBills.value.has(billId)) {
@@ -728,6 +764,151 @@ onUnmounted(() => clearInterval(interval))
   color: #005fa3;
   font-weight: 800;
   font-size: 1.4rem;
+}
+
+/* Four-column row for meter data */
+.ha-summary-row-four {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+
+.ha-summary-box-compact {
+  padding: 0.5rem;
+  border-radius: 6px;
+  text-align: center;
+  min-width: 0;
+}
+
+.ha-summary-label-sm {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ha-summary-value-sm {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Compact meter highlight boxes */
+.ha-summary-box-compact.ha-meter-highlight,
+.ha-summary-box-compact.ha-cost-highlight {
+  border-width: 1.5px;
+}
+
+.ha-summary-box-compact.ha-meter-highlight .ha-summary-label-sm,
+.ha-summary-box-compact.ha-cost-highlight .ha-summary-label-sm {
+  color: #0088cc;
+  font-weight: 600;
+}
+
+.ha-summary-box-compact .ha-meter-highlight-value,
+.ha-summary-box-compact .ha-cost-highlight-value {
+  font-size: 0.95rem;
+}
+
+/* Projected usage/bill highlights - purple theme */
+.ha-projected-highlight {
+  background: transparent;
+  border: 1.5px solid #7b1fa2;
+  border-radius: 6px;
+}
+
+.ha-projected-highlight .ha-summary-label-sm {
+  color: #7b1fa2;
+  font-weight: 600;
+}
+
+.ha-projected-highlight-value {
+  color: #4a148c;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.ha-projected-cost-highlight {
+  background: transparent;
+  border: 1.5px solid #7b1fa2;
+  border-radius: 6px;
+}
+
+.ha-projected-cost-highlight .ha-summary-label-sm {
+  color: #7b1fa2;
+  font-weight: 600;
+}
+
+.ha-projected-cost-value {
+  color: #4a148c;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+/* Billing period row */
+.ha-billing-period-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: #555;
+  flex-wrap: wrap;
+}
+
+.ha-billing-period-label {
+  font-weight: 600;
+  color: #666;
+}
+
+.ha-billing-period-dates {
+  color: #333;
+  font-weight: 500;
+}
+
+/* Responsive adjustments for 4-column layout */
+@media (max-width: 600px) {
+  .ha-summary-row-four {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .ha-summary-label-sm {
+    font-size: 0.55rem;
+  }
+  
+  .ha-summary-value-sm {
+    font-size: 0.85rem;
+  }
+  
+  .ha-billing-period-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  
+  .ha-billing-period-dates {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .ha-summary-row-four {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.35rem;
+  }
+  
+  .ha-summary-box-compact {
+    padding: 0.4rem;
+  }
+  
+  .ha-summary-value-sm {
+    font-size: 0.8rem;
+  }
 }
 
 /* Bill Card - Collapsible */
