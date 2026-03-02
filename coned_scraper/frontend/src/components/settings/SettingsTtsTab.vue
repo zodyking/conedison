@@ -1,231 +1,397 @@
 <template>
-  <div class="ha-card">
-    <div class="ha-card-header">
-      <span class="ha-card-icon">🔊</span>
-      <span>TTS Alerts</span>
+  <div class="tts-settings">
+    <!-- Loading State -->
+    <div v-if="loading" class="tts-loading">
+      <div class="tts-spinner"></div>
+      <p>Loading TTS settings...</p>
     </div>
-    <div class="ha-card-content">
-      <p class="ha-tts-intro">
-        Configure text-to-speech for Con Edison events. Messages use <strong>(prefix), (message)</strong>.
-        When running as a Home Assistant addon, TTS is sent directly via the HA API.
-      </p>
 
-      <div class="ha-tts-form">
-        <div class="ha-form-row">
-          <label class="ha-toggle-wrap">
-            <input v-model="enabled" type="checkbox" class="ha-toggle" />
-            <span class="ha-toggle-slider"></span>
-            <span class="ha-toggle-label">Enable TTS Alerts</span>
-          </label>
+    <template v-else>
+      <!-- General TTS Settings -->
+      <div class="tts-section">
+        <div class="tts-section-header" @click="toggleSection('general')">
+          <div class="tts-section-title">
+            <span class="tts-section-icon">🔊</span>
+            <span>General TTS Settings</span>
+          </div>
+          <span class="tts-section-chevron" :class="{ expanded: expandedSections.general }">▼</span>
         </div>
+        
+        <div v-if="expandedSections.general" class="tts-section-content">
+          <div class="tts-toggle-row">
+            <label class="tts-toggle">
+              <input v-model="config.enabled" type="checkbox" />
+              <span class="tts-toggle-slider"></span>
+            </label>
+            <span class="tts-toggle-label">Enable TTS Alerts</span>
+          </div>
 
-        <div class="ha-form-group">
-          <label for="tts-media-player" class="ha-form-label">Media Player <span class="ha-required">*</span></label>
-          <input
-            id="tts-media-player"
-            v-model="mediaPlayer"
-            type="text"
-            class="ha-form-input ha-input-mono"
-            placeholder="media_player.living_room"
-          />
-          <div class="ha-form-hint">Home Assistant entity ID (e.g. media_player.kitchen)</div>
-        </div>
-
-        <div class="ha-form-group">
-          <label for="tts-service" class="ha-form-label">TTS Entity <span class="ha-required">*</span></label>
-          <select id="tts-service" v-model="ttsService" class="ha-form-input ha-form-select">
-            <option value="tts.google_translate_say">tts.google_translate_say</option>
-            <option value="tts.cloud_say">tts.cloud_say</option>
-            <option value="tts.amazon_polly_say">tts.amazon_polly_say</option>
-            <option value="tts.piper">tts.piper</option>
-            <option value="tts.microsoft_edge_say">tts.microsoft_edge_say</option>
-            <option value="_custom">Custom...</option>
-          </select>
-          <input
-            v-if="ttsService === '_custom'"
-            v-model="ttsServiceCustom"
-            type="text"
-            class="ha-form-input ha-input-mono ha-form-input-mt"
-            placeholder="tts.your_service_say"
-          />
-        </div>
-
-        <div class="ha-form-group">
-          <label for="tts-volume" class="ha-form-label">Volume</label>
-          <div class="ha-volume-row">
+          <div class="tts-form-group">
+            <label class="tts-label">Media Player <span class="tts-required">*</span></label>
+            <select v-model="config.media_player" class="tts-select">
+              <option value="">-- Select Media Player --</option>
+              <option v-for="mp in mediaPlayers" :key="mp.entity_id" :value="mp.entity_id">
+                {{ mp.friendly_name }} ({{ mp.state }})
+              </option>
+            </select>
+            <p v-if="!isAddon" class="tts-hint tts-hint-warning">
+              ⚠️ Not running as HA addon. Enter media player entity ID manually.
+            </p>
             <input
-              id="tts-volume"
-              v-model.number="volume"
-              type="range"
-              class="ha-volume-slider"
-              min="0"
-              max="1"
-              step="0.05"
+              v-if="!isAddon || mediaPlayers.length === 0"
+              v-model="config.media_player"
+              type="text"
+              class="tts-input"
+              placeholder="media_player.living_room"
             />
-            <span class="ha-volume-value">{{ volumePercent }}%</span>
+          </div>
+
+          <div class="tts-form-group">
+            <label class="tts-label">TTS Service <span class="tts-required">*</span></label>
+            <select v-model="config.tts_service" class="tts-select">
+              <option value="">-- Select TTS Service --</option>
+              <option v-for="tts in ttsEntities" :key="tts.entity_id" :value="tts.entity_id">
+                {{ tts.friendly_name }}
+              </option>
+              <option value="tts.google_translate_say">tts.google_translate_say</option>
+              <option value="tts.cloud_say">tts.cloud_say</option>
+              <option value="tts.piper">tts.piper</option>
+            </select>
+            <input
+              v-if="!isAddon || ttsEntities.length === 0"
+              v-model="config.tts_service"
+              type="text"
+              class="tts-input"
+              placeholder="tts.google_translate_say"
+            />
+          </div>
+
+          <div class="tts-form-group">
+            <label class="tts-label">Volume</label>
+            <div class="tts-volume-row">
+              <input
+                v-model.number="config.volume"
+                type="range"
+                class="tts-volume-slider"
+                min="0"
+                max="1"
+                step="0.05"
+              />
+              <span class="tts-volume-value">{{ Math.round((config.volume || 0) * 100) }}%</span>
+            </div>
+          </div>
+
+          <div class="tts-form-group">
+            <label class="tts-label">Language</label>
+            <input
+              v-model="config.language"
+              type="text"
+              class="tts-input"
+              placeholder="en, en-US"
+            />
+          </div>
+
+          <div class="tts-toggle-row">
+            <label class="tts-toggle">
+              <input v-model="config.wait_for_idle" type="checkbox" />
+              <span class="tts-toggle-slider"></span>
+            </label>
+            <span class="tts-toggle-label">Wait for media player idle</span>
+          </div>
+          <p class="tts-hint">Only play when media player is idle; otherwise wait up to 5 minutes</p>
+
+          <button class="tts-btn tts-btn-primary" :disabled="saving" @click="saveConfig">
+            {{ saving ? 'Saving...' : 'Save Settings' }}
+          </button>
+
+          <div v-if="generalMessage" :class="['tts-message', generalMessage.type]">
+            {{ generalMessage.text }}
           </div>
         </div>
-
-        <div class="ha-form-group">
-          <label for="tts-language" class="ha-form-label">Language</label>
-          <input
-            id="tts-language"
-            v-model="language"
-            type="text"
-            class="ha-form-input"
-            placeholder="e.g. en, en-US"
-          />
-        </div>
-
-        <div class="ha-form-group">
-          <label for="tts-prefix" class="ha-form-label">TTS Prefix</label>
-          <input
-            id="tts-prefix"
-            v-model="prefix"
-            type="text"
-            class="ha-form-input"
-            placeholder="Message from Con Edison."
-          />
-          <div class="ha-form-hint">Prepended to every message</div>
-        </div>
-
-        <div class="ha-form-row">
-          <label class="ha-toggle-wrap">
-            <input v-model="waitForIdle" type="checkbox" class="ha-toggle" />
-            <span class="ha-toggle-slider"></span>
-            <span class="ha-toggle-label">Wait for media player idle</span>
-          </label>
-          <div class="ha-form-hint">Only play when media player is idle; otherwise wait up to 5 minutes</div>
-        </div>
-
-        <button type="button" class="ha-button ha-button-primary ha-btn-save" :disabled="isLoading" @click="handleSave">
-          {{ isLoading ? 'Saving...' : 'Save TTS Config' }}
-        </button>
       </div>
 
-      <details class="ha-tts-section">
-        <summary>TTS Message Templates</summary>
-        <p class="ha-message-desc">
-          Use <code v-pre>{placeholder}</code> for variables (e.g. <code v-pre>{amount}</code>, <code v-pre>{balance}</code>, <code v-pre>{month_range}</code>).
-        </p>
-        <div v-for="msgKey in messageEntries" :key="msgKey" class="ha-form-group">
-          <label :for="`msg-${msgKey}`" class="ha-form-label">{{ formatLabel(msgKey) }}</label>
-          <input
-            :id="`msg-${msgKey}`"
-            v-model="messages[msgKey]"
-            type="text"
-            class="ha-form-input"
-            :placeholder="placeholders[msgKey]"
-          />
+      <!-- Scheduled TTS -->
+      <div class="tts-section">
+        <div class="tts-section-header" @click="toggleSection('schedule')">
+          <div class="tts-section-title">
+            <span class="tts-section-icon">⏰</span>
+            <span>Scheduled Announcements</span>
+          </div>
+          <span class="tts-section-sub">Bill summary at scheduled times</span>
+          <span class="tts-section-chevron" :class="{ expanded: expandedSections.schedule }">▼</span>
         </div>
-        <button type="button" class="ha-button ha-button-primary" :disabled="isLoading" @click="handleSave">
-          {{ isLoading ? 'Saving...' : 'Save Messages' }}
-        </button>
-      </details>
-
-      <details class="ha-tts-section">
-        <summary>Scheduled TTS Announcements</summary>
-        <p class="ha-message-desc">
-          Schedule automatic bill summary announcements at specific times.
-        </p>
         
-        <div class="ha-form-row">
-          <label class="ha-toggle-wrap">
-            <input v-model="scheduleEnabled" type="checkbox" class="ha-toggle" />
-            <span class="ha-toggle-slider"></span>
-            <span class="ha-toggle-label">Enable Scheduled TTS</span>
-          </label>
-        </div>
+        <div v-if="expandedSections.schedule" class="tts-section-content">
+          <div class="tts-toggle-row">
+            <label class="tts-toggle">
+              <input v-model="schedule.enabled" type="checkbox" />
+              <span class="tts-toggle-slider"></span>
+            </label>
+            <span class="tts-toggle-label">Enable Scheduled TTS</span>
+          </div>
 
-        <div v-if="scheduleEnabled" class="ha-schedule-config">
-          <div v-for="(item, idx) in scheduleTimes" :key="idx" class="ha-schedule-item">
-            <div class="ha-form-group">
-              <label class="ha-form-label">Time</label>
-              <input
-                v-model="item.time"
-                type="time"
-                class="ha-form-input ha-time-input"
-              />
+          <template v-if="schedule.enabled">
+            <div class="tts-form-group">
+              <label class="tts-label">Announce Every</label>
+              <select v-model.number="schedule.hour_pattern" class="tts-select">
+                <option :value="1">1 hour</option>
+                <option :value="2">2 hours</option>
+                <option :value="3">3 hours</option>
+                <option :value="4">4 hours</option>
+                <option :value="6">6 hours</option>
+                <option :value="12">12 hours</option>
+              </select>
             </div>
-            <div class="ha-form-group ha-days-group">
-              <label class="ha-form-label">Days</label>
-              <div class="ha-days-row">
-                <label v-for="day in dayOptions" :key="day.value" class="ha-day-checkbox">
+
+            <div class="tts-form-group">
+              <label class="tts-label">Minute Offset (0-59)</label>
+              <input
+                v-model.number="schedule.minute_offset"
+                type="number"
+                class="tts-input"
+                min="0"
+                max="59"
+              />
+              <p class="tts-hint">e.g., 3 means announcements at :03 past the hour</p>
+            </div>
+
+            <div class="tts-form-group">
+              <label class="tts-label">Active Hours</label>
+              <div class="tts-time-row">
+                <input v-model="schedule.start_time" type="time" class="tts-time-input" />
+                <span class="tts-time-separator">to</span>
+                <input v-model="schedule.end_time" type="time" class="tts-time-input" />
+              </div>
+            </div>
+
+            <div class="tts-form-group">
+              <label class="tts-label">Active Days</label>
+              <div class="tts-days-row">
+                <label
+                  v-for="day in dayOptions"
+                  :key="day.value"
+                  class="tts-day-chip"
+                  :class="{ active: schedule.days_of_week?.includes(day.value) }"
+                >
                   <input
                     type="checkbox"
-                    :checked="item.days?.includes(day.value)"
-                    @change="toggleDay(idx, day.value)"
+                    :checked="schedule.days_of_week?.includes(day.value)"
+                    @change="toggleDay(day.value)"
                   />
-                  <span>{{ day.label }}</span>
+                  {{ day.label }}
                 </label>
               </div>
             </div>
-            <button type="button" class="ha-btn ha-btn-red ha-btn-sm" @click="removeScheduleTime(idx)">✕</button>
+          </template>
+
+          <div class="tts-form-group">
+            <label class="tts-label">Message Prefix</label>
+            <input
+              v-model="config.prefix"
+              type="text"
+              class="tts-input"
+              placeholder="Message from Con Edison."
+            />
+            <p class="tts-hint">Prepended to every TTS message</p>
           </div>
-          
-          <button type="button" class="ha-button ha-button-secondary" @click="addScheduleTime">
-            + Add Schedule Time
-          </button>
-        </div>
 
-        <div class="ha-schedule-actions">
-          <button type="button" class="ha-button ha-button-primary" :disabled="scheduleLoading" @click="handleSaveSchedule">
-            {{ scheduleLoading ? 'Saving...' : 'Save Schedule' }}
-          </button>
-          <button
-            type="button"
-            class="ha-button ha-btn-test"
-            :disabled="!enabled || !mediaPlayer.trim() || billSummaryLoading"
-            @click="handleTestBillSummary"
-          >
-            {{ billSummaryLoading ? 'Sending...' : 'Test Bill Summary' }}
-          </button>
-        </div>
-        <div v-if="scheduleMessage" :class="['ha-message', scheduleMessage.type]">{{ scheduleMessage.text }}</div>
-      </details>
+          <div class="tts-actions-row">
+            <button class="tts-btn tts-btn-primary" :disabled="scheduleSaving" @click="saveSchedule">
+              {{ scheduleSaving ? 'Saving...' : 'Save Schedule' }}
+            </button>
+            <button
+              class="tts-btn tts-btn-secondary"
+              :disabled="!config.enabled || !config.media_player"
+              @click="testBillSummary"
+            >
+              {{ testingSummary ? 'Sending...' : 'Test Bill Summary' }}
+            </button>
+          </div>
 
-      <div class="ha-tts-actions">
-        <button
-          type="button"
-          class="ha-button ha-btn-test"
-          :disabled="!enabled || !mediaPlayer.trim() || testLoading"
-          @click="handleTest"
-        >
-          {{ testLoading ? 'Sending...' : 'Test TTS' }}
-        </button>
+          <div v-if="scheduleMessage" :class="['tts-message', scheduleMessage.type]">
+            {{ scheduleMessage.text }}
+          </div>
+        </div>
       </div>
 
-      <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
-    </div>
+      <!-- Message Preview -->
+      <div class="tts-section">
+        <div class="tts-section-header" @click="toggleSection('preview')">
+          <div class="tts-section-title">
+            <span class="tts-section-icon">👁️</span>
+            <span>Message Preview</span>
+          </div>
+          <span class="tts-section-sub">See what TTS will say</span>
+          <span class="tts-section-chevron" :class="{ expanded: expandedSections.preview }">▼</span>
+        </div>
+        
+        <div v-if="expandedSections.preview" class="tts-section-content">
+          <button class="tts-btn tts-btn-secondary" :disabled="loadingPreview" @click="loadPreview">
+            {{ loadingPreview ? 'Generating...' : 'Generate Preview' }}
+          </button>
+
+          <div v-if="previewMessage" class="tts-preview-box">
+            <div class="tts-preview-label">TTS Message:</div>
+            <div class="tts-preview-text">{{ previewMessage }}</div>
+          </div>
+
+          <div v-if="previewData" class="tts-preview-data">
+            <div class="tts-preview-item">
+              <span class="tts-preview-key">Greeting:</span>
+              <span>{{ previewData.greeting }}</span>
+            </div>
+            <div class="tts-preview-item">
+              <span class="tts-preview-key">Time:</span>
+              <span>{{ previewData.time }}</span>
+            </div>
+            <div class="tts-preview-item">
+              <span class="tts-preview-key">Balance:</span>
+              <span>{{ previewData.balance ?? 'N/A' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Message Templates -->
+      <div class="tts-section">
+        <div class="tts-section-header" @click="toggleSection('templates')">
+          <div class="tts-section-title">
+            <span class="tts-section-icon">📝</span>
+            <span>Message Templates</span>
+          </div>
+          <span class="tts-section-sub">Customize event messages</span>
+          <span class="tts-section-chevron" :class="{ expanded: expandedSections.templates }">▼</span>
+        </div>
+        
+        <div v-if="expandedSections.templates" class="tts-section-content">
+          <p class="tts-hint">
+            Use <code>{placeholder}</code> for variables:
+            <code>{amount}</code>, <code>{balance}</code>, <code>{month_range}</code>
+          </p>
+
+          <div v-for="(template, key) in config.messages" :key="key" class="tts-form-group">
+            <label class="tts-label">{{ formatLabel(key) }}</label>
+            <input
+              v-model="config.messages[key]"
+              type="text"
+              class="tts-input"
+              :placeholder="defaultMessages[key]"
+            />
+          </div>
+
+          <button class="tts-btn tts-btn-primary" :disabled="saving" @click="saveConfig">
+            {{ saving ? 'Saving...' : 'Save Templates' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Test TTS -->
+      <div class="tts-section">
+        <div class="tts-section-header" @click="toggleSection('test')">
+          <div class="tts-section-title">
+            <span class="tts-section-icon">🧪</span>
+            <span>Test TTS</span>
+          </div>
+          <span class="tts-section-chevron" :class="{ expanded: expandedSections.test }">▼</span>
+        </div>
+        
+        <div v-if="expandedSections.test" class="tts-section-content">
+          <p class="tts-hint">Send a test message to verify your TTS configuration.</p>
+          
+          <button
+            class="tts-btn tts-btn-orange"
+            :disabled="!config.enabled || !config.media_player || testing"
+            @click="testTts"
+          >
+            {{ testing ? 'Sending...' : 'Send Test TTS' }}
+          </button>
+
+          <div v-if="testMessage" :class="['tts-message', testMessage.type]">
+            {{ testMessage.text }}
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { getApiBase } from '../../lib/api-base'
 
-const enabled = ref(false)
-const mediaPlayer = ref('')
-const volume = ref(0.7)
-const language = ref('en')
-const ttsService = ref('tts.google_translate_say')
-const ttsServiceCustom = ref('')
-const prefix = ref('Message from Con Edison.')
-const waitForIdle = ref(true)
-const messages = ref<Record<string, string>>({
-  new_bill: 'Your new Con Edison bill for {month_range} is now available.',
-  payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
-})
-const isLoading = ref(false)
-const testLoading = ref(false)
-const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+interface HaEntity {
+  entity_id: string
+  friendly_name: string
+  state?: string
+}
 
-// Schedule state
-const scheduleEnabled = ref(false)
-const scheduleTimes = ref<Array<{ time: string; days: string[] }>>([])
-const scheduleLoading = ref(false)
-const scheduleMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
-const billSummaryLoading = ref(false)
+interface TtsConfig {
+  enabled: boolean
+  media_player: string
+  volume: number
+  language: string
+  tts_service: string
+  prefix: string
+  wait_for_idle: boolean
+  messages: Record<string, string>
+}
+
+interface Schedule {
+  enabled: boolean
+  hour_pattern: number
+  minute_offset: number
+  start_time: string
+  end_time: string
+  days_of_week: string[]
+}
+
+const loading = ref(true)
+const saving = ref(false)
+const scheduleSaving = ref(false)
+const testing = ref(false)
+const testingSummary = ref(false)
+const loadingPreview = ref(false)
+
+const isAddon = ref(false)
+const mediaPlayers = ref<HaEntity[]>([])
+const ttsEntities = ref<HaEntity[]>([])
+
+const config = reactive<TtsConfig>({
+  enabled: false,
+  media_player: '',
+  volume: 0.7,
+  language: 'en',
+  tts_service: 'tts.google_translate_say',
+  prefix: 'Message from Con Edison.',
+  wait_for_idle: true,
+  messages: {
+    new_bill: 'Your new Con Edison bill for {month_range} is now available.',
+    payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
+  }
+})
+
+const schedule = reactive<Schedule>({
+  enabled: false,
+  hour_pattern: 3,
+  minute_offset: 0,
+  start_time: '08:00',
+  end_time: '21:00',
+  days_of_week: ['mon', 'tue', 'wed', 'thu', 'fri']
+})
+
+const expandedSections = reactive({
+  general: true,
+  schedule: false,
+  preview: false,
+  templates: false,
+  test: false
+})
+
+const generalMessage = ref<{ type: string; text: string } | null>(null)
+const scheduleMessage = ref<{ type: string; text: string } | null>(null)
+const testMessage = ref<{ type: string; text: string } | null>(null)
+const previewMessage = ref('')
+const previewData = ref<any>(null)
 
 const dayOptions = [
   { value: 'mon', label: 'Mon' },
@@ -234,24 +400,44 @@ const dayOptions = [
   { value: 'thu', label: 'Thu' },
   { value: 'fri', label: 'Fri' },
   { value: 'sat', label: 'Sat' },
-  { value: 'sun', label: 'Sun' },
+  { value: 'sun', label: 'Sun' }
 ]
 
-const messageEntries = computed(() => Object.keys(messages.value))
-
-const volumePercent = computed(() => Math.round((volume.value || 0) * 100))
-
-const effectiveTtsService = computed(() =>
-  ttsService.value === '_custom' ? ttsServiceCustom.value.trim() : ttsService.value
-)
-
-const placeholders: Record<string, string> = {
+const defaultMessages: Record<string, string> = {
   new_bill: 'Your new Con Edison bill for {month_range} is now available.',
   payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
 }
 
-function formatLabel(key: string) {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+function toggleSection(key: keyof typeof expandedSections) {
+  expandedSections[key] = !expandedSections[key]
+}
+
+function toggleDay(day: string) {
+  if (!schedule.days_of_week) schedule.days_of_week = []
+  const idx = schedule.days_of_week.indexOf(day)
+  if (idx >= 0) {
+    schedule.days_of_week.splice(idx, 1)
+  } else {
+    schedule.days_of_week.push(day)
+  }
+}
+
+function formatLabel(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+async function loadHaEntities() {
+  try {
+    const res = await fetch(`${getApiBase()}/ha-entities`)
+    if (res.ok) {
+      const data = await res.json()
+      isAddon.value = data.is_addon || false
+      mediaPlayers.value = data.media_players || []
+      ttsEntities.value = data.tts_entities || []
+    }
+  } catch (e) {
+    console.error('Failed to load HA entities:', e)
+  }
 }
 
 async function loadConfig() {
@@ -259,122 +445,85 @@ async function loadConfig() {
     const res = await fetch(`${getApiBase()}/tts-config`)
     if (res.ok) {
       const data = await res.json()
-      enabled.value = data.enabled ?? false
-      mediaPlayer.value = data.media_player ?? ''
-      volume.value = typeof data.volume === 'number' ? data.volume : 0.7
-      language.value = data.language ?? 'en'
-      const svc = data.tts_service ?? 'tts.google_translate_say'
-      const known = ['tts.google_translate_say', 'tts.cloud_say', 'tts.amazon_polly_say', 'tts.piper', 'tts.microsoft_edge_say']
-      if (known.includes(svc)) {
-        ttsService.value = svc
-      } else {
-        ttsService.value = '_custom'
-        ttsServiceCustom.value = svc
-      }
-      prefix.value = data.prefix ?? 'Message from Con Edison.'
-      waitForIdle.value = data.wait_for_idle ?? true
+      config.enabled = data.enabled ?? false
+      config.media_player = data.media_player ?? ''
+      config.volume = typeof data.volume === 'number' ? data.volume : 0.7
+      config.language = data.language ?? 'en'
+      config.tts_service = data.tts_service ?? 'tts.google_translate_say'
+      config.prefix = data.prefix ?? 'Message from Con Edison.'
+      config.wait_for_idle = data.wait_for_idle ?? true
       if (data.messages && typeof data.messages === 'object') {
-        messages.value = { ...messages.value, ...data.messages }
+        config.messages = { ...defaultMessages, ...data.messages }
       }
     }
   } catch (e) {
-    console.error(e)
+    console.error('Failed to load TTS config:', e)
   }
 }
 
-async function handleSave() {
-  isLoading.value = true
-  message.value = null
+async function loadSchedule() {
+  try {
+    const res = await fetch(`${getApiBase()}/tts-schedule`)
+    if (res.ok) {
+      const data = await res.json()
+      schedule.enabled = data.enabled ?? false
+      schedule.hour_pattern = data.hour_pattern ?? 3
+      schedule.minute_offset = data.minute_offset ?? 0
+      schedule.start_time = data.start_time ?? '08:00'
+      schedule.end_time = data.end_time ?? '21:00'
+      schedule.days_of_week = data.days_of_week ?? ['mon', 'tue', 'wed', 'thu', 'fri']
+    }
+  } catch (e) {
+    console.error('Failed to load schedule:', e)
+  }
+}
+
+async function saveConfig() {
+  saving.value = true
+  generalMessage.value = null
   try {
     const res = await fetch(`${getApiBase()}/tts-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        enabled: enabled.value,
-        media_player: mediaPlayer.value.trim(),
-        volume: volume.value,
-        language: language.value,
-        prefix: prefix.value,
-        tts_service: effectiveTtsService.value || 'tts.google_translate_say',
-        wait_for_idle: waitForIdle.value,
-        messages: messages.value,
-      }),
+        enabled: config.enabled,
+        media_player: config.media_player.trim(),
+        volume: config.volume,
+        language: config.language,
+        prefix: config.prefix,
+        tts_service: config.tts_service || 'tts.google_translate_say',
+        wait_for_idle: config.wait_for_idle,
+        messages: config.messages
+      })
     })
     if (res.ok) {
-      message.value = { type: 'success', text: 'TTS config saved' }
+      generalMessage.value = { type: 'success', text: 'TTS settings saved' }
     } else {
       const err = await res.json().catch(() => ({}))
-      message.value = { type: 'error', text: err.detail || 'Failed to save' }
+      generalMessage.value = { type: 'error', text: err.detail || 'Failed to save' }
     }
   } catch {
-    message.value = { type: 'error', text: 'Failed to connect' }
+    generalMessage.value = { type: 'error', text: 'Failed to connect' }
   } finally {
-    isLoading.value = false
+    saving.value = false
   }
 }
 
-async function handleTest() {
-  if (!enabled.value || !mediaPlayer.value.trim()) return
-  testLoading.value = true
-  message.value = null
-  try {
-    const res = await fetch(`${getApiBase()}/tts/test`, { method: 'POST' })
-    const data = await res.json().catch(() => ({}))
-    if (res.ok) {
-      message.value = { type: 'success', text: data.message || 'TTS request sent' }
-    } else {
-      message.value = { type: 'error', text: data.detail || 'Failed' }
-    }
-  } catch {
-    message.value = { type: 'error', text: 'Failed to connect' }
-  } finally {
-    testLoading.value = false
-  }
-}
-
-async function loadScheduleConfig() {
-  try {
-    const res = await fetch(`${getApiBase()}/tts-schedule`)
-    if (res.ok) {
-      const data = await res.json()
-      scheduleEnabled.value = data.enabled ?? false
-      scheduleTimes.value = data.schedule_times ?? []
-    }
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-function addScheduleTime() {
-  scheduleTimes.value.push({ time: '08:00', days: ['mon', 'tue', 'wed', 'thu', 'fri'] })
-}
-
-function removeScheduleTime(idx: number) {
-  scheduleTimes.value.splice(idx, 1)
-}
-
-function toggleDay(idx: number, day: string) {
-  const item = scheduleTimes.value[idx]
-  if (!item.days) item.days = []
-  const dayIdx = item.days.indexOf(day)
-  if (dayIdx >= 0) {
-    item.days.splice(dayIdx, 1)
-  } else {
-    item.days.push(day)
-  }
-}
-
-async function handleSaveSchedule() {
-  scheduleLoading.value = true
+async function saveSchedule() {
+  scheduleSaving.value = true
   scheduleMessage.value = null
   try {
     const res = await fetch(`${getApiBase()}/tts-schedule`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        enabled: scheduleEnabled.value,
-        schedule_times: scheduleTimes.value,
-      }),
+        enabled: schedule.enabled,
+        hour_pattern: schedule.hour_pattern,
+        minute_offset: schedule.minute_offset,
+        start_time: schedule.start_time,
+        end_time: schedule.end_time,
+        days_of_week: schedule.days_of_week
+      })
     })
     if (res.ok) {
       scheduleMessage.value = { type: 'success', text: 'Schedule saved' }
@@ -385,116 +534,275 @@ async function handleSaveSchedule() {
   } catch {
     scheduleMessage.value = { type: 'error', text: 'Failed to connect' }
   } finally {
-    scheduleLoading.value = false
+    scheduleSaving.value = false
   }
 }
 
-async function handleTestBillSummary() {
-  if (!enabled.value || !mediaPlayer.value.trim()) return
-  billSummaryLoading.value = true
+async function testTts() {
+  testing.value = true
+  testMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      testMessage.value = { type: 'success', text: data.message || 'TTS sent' }
+    } else {
+      testMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    testMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testBillSummary() {
+  testingSummary.value = true
   scheduleMessage.value = null
   try {
     const res = await fetch(`${getApiBase()}/tts/trigger-bill-summary`, { method: 'POST' })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
-      scheduleMessage.value = { type: 'success', text: data.message || 'Bill summary TTS sent' }
+      scheduleMessage.value = { type: 'success', text: data.message || 'Bill summary sent' }
     } else {
       scheduleMessage.value = { type: 'error', text: data.detail || 'Failed' }
     }
   } catch {
     scheduleMessage.value = { type: 'error', text: 'Failed to connect' }
   } finally {
-    billSummaryLoading.value = false
+    testingSummary.value = false
   }
 }
 
-onMounted(() => {
-  loadConfig()
-  loadScheduleConfig()
+async function loadPreview() {
+  loadingPreview.value = true
+  previewMessage.value = ''
+  previewData.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/preview-message`)
+    if (res.ok) {
+      const data = await res.json()
+      previewMessage.value = data.message || ''
+      previewData.value = data
+    }
+  } catch (e) {
+    console.error('Failed to load preview:', e)
+  } finally {
+    loadingPreview.value = false
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadHaEntities(), loadConfig(), loadSchedule()])
+  loading.value = false
 })
 </script>
 
 <style scoped>
-.ha-tts-intro {
-  margin-bottom: 1.5rem;
-  font-size: 0.95rem;
-  color: #555;
-  line-height: 1.5;
-}
-.ha-tts-intro strong { color: #333; }
-
-.ha-tts-form {
+.tts-settings {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  margin-bottom: 1.5rem;
+  gap: 1rem;
 }
 
-.ha-form-row { margin-bottom: 0.5rem; }
-.ha-form-row .ha-form-hint { margin-top: 0.25rem; margin-left: 0; }
+.tts-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: #888;
+}
 
-.ha-form-group { display: flex; flex-direction: column; gap: 0.35rem; }
-.ha-form-hint { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
-.ha-required { color: #e65100; }
+.tts-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #ff9800;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
 
-.ha-toggle-wrap {
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.tts-section {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.tts-section-header {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  background: #fafafa;
+  border-bottom: 1px solid #eee;
+  transition: background 0.2s;
+}
+
+.tts-section-header:hover {
+  background: #f5f5f5;
+}
+
+.tts-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.tts-section-icon {
+  font-size: 1.1rem;
+}
+
+.tts-section-sub {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #888;
+  margin-left: 0.5rem;
+}
+
+.tts-section-chevron {
+  color: #999;
+  font-size: 0.75rem;
+  transition: transform 0.2s;
+}
+
+.tts-section-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.tts-section-content {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tts-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.tts-label {
+  font-weight: 500;
+  color: #444;
+  font-size: 0.9rem;
+}
+
+.tts-required {
+  color: #e65100;
+}
+
+.tts-input,
+.tts-select {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.tts-input:focus,
+.tts-select:focus {
+  outline: none;
+  border-color: #ff9800;
+  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.1);
+}
+
+.tts-select {
   cursor: pointer;
 }
-.ha-toggle {
-  position: absolute;
+
+.tts-hint {
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 0.25rem;
+}
+
+.tts-hint code {
+  background: #f0f0f0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.tts-hint-warning {
+  color: #f57c00;
+}
+
+.tts-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tts-toggle {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+}
+
+.tts-toggle input {
   opacity: 0;
   width: 0;
   height: 0;
 }
-.ha-toggle-label {
-  font-weight: 500;
-  color: #333;
-}
-.ha-toggle-slider {
-  position: relative;
-  width: 44px;
-  height: 24px;
+
+.tts-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: #ccc;
-  border-radius: 24px;
-  transition: background 0.2s;
+  border-radius: 26px;
+  transition: background 0.3s;
 }
-.ha-toggle-slider::before {
+
+.tts-toggle-slider::before {
   content: '';
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   left: 2px;
   top: 2px;
   background: white;
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  transition: transform 0.2s;
-}
-.ha-toggle:checked + .ha-toggle-slider {
-  background: #03a9f4;
-}
-.ha-toggle:checked + .ha-toggle-slider::before {
-  transform: translateX(20px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.3s;
 }
 
-.ha-form-select {
-  cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23666' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  padding-right: 2rem;
+.tts-toggle input:checked + .tts-toggle-slider {
+  background: #ff9800;
 }
-.ha-form-input-mt { margin-top: 0.5rem; }
 
-.ha-volume-row {
+.tts-toggle input:checked + .tts-toggle-slider::before {
+  transform: translateX(22px);
+}
+
+.tts-toggle-label {
+  font-weight: 500;
+  color: #333;
+}
+
+.tts-volume-row {
   display: flex;
   align-items: center;
   gap: 1rem;
 }
-.ha-volume-slider {
+
+.tts-volume-slider {
   flex: 1;
   height: 8px;
   -webkit-appearance: none;
@@ -502,7 +810,8 @@ onMounted(() => {
   background: #e0e0e0;
   border-radius: 4px;
 }
-.ha-volume-slider::-webkit-slider-thumb {
+
+.tts-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 20px;
@@ -510,9 +819,10 @@ onMounted(() => {
   background: #ff9800;
   border-radius: 50%;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
-.ha-volume-slider::-moz-range-thumb {
+
+.tts-volume-slider::-moz-range-thumb {
   width: 20px;
   height: 20px;
   background: #ff9800;
@@ -520,138 +830,163 @@ onMounted(() => {
   cursor: pointer;
   border: none;
 }
-.ha-volume-value {
+
+.tts-volume-value {
   min-width: 3.5rem;
   font-weight: 500;
   color: #333;
-  font-size: 0.9rem;
 }
 
-.ha-btn-save { align-self: flex-start; }
-
-.ha-tts-section {
-  margin-top: 1.5rem;
-  padding: 1rem 1.25rem;
-  background: #f9f9f9;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-}
-.ha-tts-section summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 0.75rem;
-}
-.ha-tts-section[open] summary { margin-bottom: 1rem; }
-.ha-message-desc {
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-  color: #555;
-}
-.ha-message-desc code {
-  background: #eee;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-}
-
-.ha-tts-actions { margin-top: 1.25rem; }
-.ha-btn-test {
-  background: #ff9800 !important;
-  color: white !important;
-  padding: 0.65rem 1.25rem;
-  font-weight: 600;
-}
-.ha-btn-test:hover:not(:disabled) {
-  background: #f57c00 !important;
-}
-.ha-btn-test:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.ha-message {
-  margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.ha-message.success { background: #e8f5e9; color: #2e7d32; }
-.ha-message.error { background: #ffebee; color: #c62828; }
-
-.ha-input-mono { font-family: ui-monospace, monospace; }
-
-/* Schedule styles */
-.ha-schedule-config {
+.tts-time-row {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin-top: 1rem;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-.ha-schedule-item {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
-  padding: 1rem;
-  background: #f5f5f5;
+.tts-time-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
   border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  font-size: 0.95rem;
 }
 
-.ha-time-input {
-  width: 120px;
+.tts-time-separator {
+  color: #888;
 }
 
-.ha-days-group {
-  flex: 1;
-}
-
-.ha-days-row {
+.tts-days-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-.ha-day-checkbox {
+.tts-day-chip {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  background: #fff;
+  padding: 0.4rem 0.75rem;
+  background: #f5f5f5;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
 }
 
-.ha-day-checkbox:has(input:checked) {
-  background: #e3f2fd;
-  border-color: #03a9f4;
+.tts-day-chip input {
+  display: none;
 }
 
-.ha-day-checkbox input {
-  margin: 0;
+.tts-day-chip.active {
+  background: #ff9800;
+  border-color: #ff9800;
+  color: white;
 }
 
-.ha-btn-sm {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-}
-
-.ha-btn-red {
-  background: #f44336 !important;
-  color: white !important;
-}
-
-.ha-button-secondary {
-  background: #e0e0e0 !important;
-  color: #333 !important;
-}
-
-.ha-schedule-actions {
+.tts-actions-row {
   display: flex;
   gap: 0.75rem;
-  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.tts-btn {
+  padding: 0.65rem 1.25rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tts-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tts-btn-primary {
+  background: #03a9f4;
+  color: white;
+}
+
+.tts-btn-primary:hover:not(:disabled) {
+  background: #0288d1;
+}
+
+.tts-btn-secondary {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.tts-btn-secondary:hover:not(:disabled) {
+  background: #d0d0d0;
+}
+
+.tts-btn-orange {
+  background: #ff9800;
+  color: white;
+}
+
+.tts-btn-orange:hover:not(:disabled) {
+  background: #f57c00;
+}
+
+.tts-message {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.tts-message.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.tts-message.error {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.tts-preview-box {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.tts-preview-label {
+  font-weight: 600;
+  color: #666;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tts-preview-text {
+  font-size: 1rem;
+  color: #333;
+  line-height: 1.6;
+  font-style: italic;
+}
+
+.tts-preview-data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: #fafafa;
+  border-radius: 8px;
+}
+
+.tts-preview-item {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.tts-preview-key {
+  font-weight: 600;
+  color: #666;
 }
 </style>

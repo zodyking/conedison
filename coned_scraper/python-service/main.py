@@ -2223,8 +2223,13 @@ class TTSScheduleTimeModel(BaseModel):
 
 class TTSScheduleModel(BaseModel):
     enabled: Optional[bool] = None
-    schedule_times: Optional[list] = None  # List of TTSScheduleTimeModel dicts
-    schedule_type: Optional[str] = None  # "daily" or "specific_days"
+    hour_pattern: Optional[int] = None  # Announce every N hours
+    minute_offset: Optional[int] = None  # Minute within hour
+    start_time: Optional[str] = None  # Active hours start "HH:MM"
+    end_time: Optional[str] = None  # Active hours end "HH:MM"
+    days_of_week: Optional[list] = None  # ["mon", "tue", ...]
+    schedule_times: Optional[list] = None  # Legacy: List of TTSScheduleTimeModel dicts
+    schedule_type: Optional[str] = None  # Legacy: "daily" or "specific_days"
 
 @app.get("/api/tts-schedule")
 async def get_tts_schedule():
@@ -2262,6 +2267,133 @@ async def trigger_bill_summary_tts():
     
     await scheduler._send_scheduled_tts(tts_config)
     return {"success": True, "message": "Bill summary TTS triggered"}
+
+
+@app.get("/api/ha-entities")
+async def get_ha_entities():
+    """Get Home Assistant entities (media players, TTS services) when running as addon"""
+    import aiohttp
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    
+    result = {
+        "media_players": [],
+        "tts_entities": [],
+        "is_addon": bool(token)
+    }
+    
+    if not token:
+        return result
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/states",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    add_log("warning", f"Failed to fetch HA states: {resp.status}")
+                    return result
+                
+                states = await resp.json()
+                
+                for entity in states:
+                    entity_id = entity.get("entity_id", "")
+                    friendly_name = entity.get("attributes", {}).get("friendly_name", entity_id)
+                    state = entity.get("state", "")
+                    
+                    if entity_id.startswith("media_player."):
+                        result["media_players"].append({
+                            "entity_id": entity_id,
+                            "friendly_name": friendly_name,
+                            "state": state
+                        })
+                    elif entity_id.startswith("tts."):
+                        result["tts_entities"].append({
+                            "entity_id": entity_id,
+                            "friendly_name": friendly_name
+                        })
+                
+                result["media_players"].sort(key=lambda x: x["friendly_name"])
+                result["tts_entities"].sort(key=lambda x: x["friendly_name"])
+                
+    except Exception as e:
+        add_log("error", f"Failed to fetch HA entities: {str(e)}")
+    
+    return result
+
+
+@app.get("/api/tts/preview-message")
+async def preview_tts_message():
+    """Generate a preview of the scheduled TTS message"""
+    from datetime import datetime
+    
+    ledger = get_ledger_data()
+    
+    now = datetime.now()
+    hour = now.hour
+    if 5 <= hour < 12:
+        greeting = "Good morning"
+    elif 12 <= hour < 17:
+        greeting = "Good afternoon"
+    elif 17 <= hour < 21:
+        greeting = "Good evening"
+    else:
+        greeting = "Good night"
+    
+    hour_12 = hour % 12 or 12
+    minute = now.minute
+    period = "AM" if hour < 12 else "PM"
+    
+    if minute == 0:
+        time_str = f"{hour_12} {period}"
+    elif minute < 10:
+        time_str = f"{hour_12} oh {minute} {period}"
+    else:
+        time_str = f"{hour_12} {minute} {period}"
+    
+    parts = [f"{greeting}, the time is {time_str}."]
+    
+    tts_config = load_tts_config()
+    prefix = tts_config.get("prefix", "")
+    if prefix:
+        parts.append(prefix)
+    
+    balance = ledger.get("total_balance")
+    if balance is not None:
+        if isinstance(balance, str):
+            balance_str = balance
+        else:
+            balance_str = f"${abs(balance):.2f}"
+            if balance < 0:
+                balance_str = f"negative {balance_str}"
+        parts.append(f"Your current Con Edison balance is {balance_str}.")
+    
+    latest_bill = ledger.get("bills", [{}])[0] if ledger.get("bills") else {}
+    if latest_bill:
+        month_range = latest_bill.get("month_range", "")
+        amount = latest_bill.get("amount", "")
+        if month_range and amount:
+            parts.append(f"Your latest bill for {month_range} is {amount}.")
+    
+    latest_payment = ledger.get("latest_payment")
+    if latest_payment:
+        pay_amount = latest_payment.get("amount", "")
+        pay_date = latest_payment.get("payment_date", "")
+        if pay_amount:
+            parts.append(f"Your last payment of {pay_amount} was received{' on ' + pay_date if pay_date else ''}.")
+    else:
+        parts.append("No recent payments on record.")
+    
+    message = " ".join(parts)
+    
+    return {
+        "message": message,
+        "greeting": greeting,
+        "time": time_str,
+        "balance": balance,
+        "latest_bill": latest_bill,
+        "latest_payment": latest_payment
+    }
 
 
 # ========== SPA Static Files & Fallback ==========

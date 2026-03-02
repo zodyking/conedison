@@ -30,17 +30,24 @@ class TTSScheduler:
     
     def load_schedule_config(self) -> Dict[str, Any]:
         """Load TTS schedule configuration."""
-        if TTS_SCHEDULE_FILE.exists():
-            try:
-                return json.loads(TTS_SCHEDULE_FILE.read_text())
-            except Exception as e:
-                logger.error(f"Failed to load TTS schedule config: {e}")
-        return {
+        defaults = {
             "enabled": False,
-            "schedule_times": [],  # List of {"time": "08:00", "days": ["mon", "tue", ...]}
-            "schedule_type": "daily",  # "daily", "specific_days"
+            "hour_pattern": 3,  # Announce every N hours
+            "minute_offset": 0,  # Minute within hour (e.g., :00, :30)
+            "start_time": "08:00",  # Active hours start
+            "end_time": "21:00",  # Active hours end
+            "days_of_week": ["mon", "tue", "wed", "thu", "fri"],
+            "schedule_times": [],  # Legacy: List of {"time": "08:00", "days": ["mon", "tue", ...]}
+            "schedule_type": "daily",  # Legacy
             "updated_at": None
         }
+        if TTS_SCHEDULE_FILE.exists():
+            try:
+                data = json.loads(TTS_SCHEDULE_FILE.read_text())
+                return {**defaults, **data}
+            except Exception as e:
+                logger.error(f"Failed to load TTS schedule config: {e}")
+        return defaults
     
     def save_schedule_config(self, config: Dict[str, Any]):
         """Save TTS schedule configuration."""
@@ -88,7 +95,14 @@ class TTSScheduler:
             await asyncio.sleep(60)  # Check every minute
     
     async def _check_and_trigger(self):
-        """Check if any scheduled TTS should be triggered."""
+        """Check if any scheduled TTS should be triggered.
+        
+        Uses home-weather style scheduling:
+        - hour_pattern: Announce every N hours (1, 2, 3, 4, 6, 12)
+        - minute_offset: The minute within the hour to trigger (0-59)
+        - start_time/end_time: Active hours window
+        - days_of_week: Active days
+        """
         schedule_config = self.load_schedule_config()
         tts_config = self.load_tts_config()
         
@@ -99,37 +113,56 @@ class TTSScheduler:
             return
         
         now = datetime.now()
-        current_time_str = now.strftime("%H:%M")
+        current_hour = now.hour
+        current_minute = now.minute
         current_day = now.weekday()  # 0 = Monday
         current_day_abbr = list(DAY_MAP.keys())[current_day]
         
-        for schedule_item in schedule_config.get("schedule_times", []):
-            trigger_time = schedule_item.get("time", "")
-            allowed_days = schedule_item.get("days", [])
+        # Check day filter
+        days_of_week = schedule_config.get("days_of_week", [])
+        if days_of_week and current_day_abbr not in [d.lower()[:3] for d in days_of_week]:
+            return
+        
+        # Check active hours
+        start_time_str = schedule_config.get("start_time", "08:00")
+        end_time_str = schedule_config.get("end_time", "21:00")
+        
+        try:
+            start_h, start_m = map(int, start_time_str.split(":"))
+            end_h, end_m = map(int, end_time_str.split(":"))
+            start_minutes = start_h * 60 + start_m
+            end_minutes = end_h * 60 + end_m
+            current_minutes = current_hour * 60 + current_minute
             
-            # Parse trigger time
-            if not trigger_time:
-                continue
-            
-            # Check if we should trigger
-            if trigger_time != current_time_str:
-                continue
-            
-            # Check day filter
-            if allowed_days and current_day_abbr not in [d.lower()[:3] for d in allowed_days]:
-                continue
-            
-            # Prevent duplicate triggers within the same minute
-            trigger_key = f"{trigger_time}_{current_day}"
-            last_trigger = self._last_triggered.get(trigger_key)
-            if last_trigger and (now - last_trigger).total_seconds() < 120:
-                continue
-            
-            # Trigger the TTS
-            self._last_triggered[trigger_key] = now
-            logger.info(f"Triggering scheduled TTS at {trigger_time}")
-            
-            await self._send_scheduled_tts(tts_config)
+            if not (start_minutes <= current_minutes <= end_minutes):
+                return
+        except Exception:
+            pass  # If parsing fails, proceed anyway
+        
+        # Check hour pattern - only trigger at hours that match the pattern
+        hour_pattern = schedule_config.get("hour_pattern", 3)
+        minute_offset = schedule_config.get("minute_offset", 0)
+        
+        # Generate trigger hours based on pattern (e.g., every 3 hours: 0, 3, 6, 9, 12, 15, 18, 21)
+        trigger_hours = list(range(0, 24, hour_pattern))
+        
+        if current_hour not in trigger_hours:
+            return
+        
+        if current_minute != minute_offset:
+            return
+        
+        # Prevent duplicate triggers within the same minute
+        trigger_key = f"pattern_{current_hour}_{current_minute}_{current_day}"
+        last_trigger = self._last_triggered.get(trigger_key)
+        if last_trigger and (now - last_trigger).total_seconds() < 120:
+            return
+        
+        # Trigger the TTS
+        self._last_triggered[trigger_key] = now
+        logger.info(f"Triggering scheduled TTS at {current_hour}:{current_minute:02d}")
+        
+        await self._send_scheduled_tts(tts_config)
     
     async def _send_scheduled_tts(self, tts_config: Dict[str, Any]):
         """Send the scheduled TTS announcement."""
