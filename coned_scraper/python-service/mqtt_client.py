@@ -288,15 +288,15 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/ConEd_kwh_used/config",
+                "topic": f"{dp}/sensor/ConEd_last_bill_kwh/config",
                 "payload": {
-                    "name": "ConEd kWh Used",
-                    "unique_id": "ConEd_kwh_used",
-                    "state_topic": f"{bt}/kwh_used",
+                    "name": "ConEd Last Bill kWh",
+                    "unique_id": "ConEd_last_bill_kwh",
+                    "state_topic": f"{bt}/last_bill_kwh",
                     "unit_of_measurement": "kWh",
                     "device_class": "energy",
                     "icon": "mdi:flash",
-                    "json_attributes_topic": f"{bt}/kwh_used_json",
+                    "json_attributes_topic": f"{bt}/last_bill_kwh_json",
                     "json_attributes_template": json_attrs,
                     "device": device,
                 },
@@ -358,15 +358,15 @@ class MQTTClient:
                 },
             },
             {
-                "topic": f"{dp}/sensor/ConEd_usage_to_date/config",
+                "topic": f"{dp}/sensor/ConEd_current_cycle_usage/config",
                 "payload": {
-                    "name": "ConEd Usage To Date",
-                    "unique_id": "ConEd_usage_to_date",
-                    "state_topic": f"{bt}/usage_to_date",
+                    "name": "ConEd Current Cycle Usage",
+                    "unique_id": "ConEd_current_cycle_usage",
+                    "state_topic": f"{bt}/current_cycle_usage",
                     "unit_of_measurement": "kWh",
                     "device_class": "energy",
                     "icon": "mdi:flash-outline",
-                    "json_attributes_topic": f"{bt}/usage_to_date_json",
+                    "json_attributes_topic": f"{bt}/current_cycle_usage_json",
                     "json_attributes_template": json_attrs,
                     "device": device,
                 },
@@ -422,13 +422,16 @@ class MQTTClient:
             f"{dp}/sensor/ConEd_payee_summary/config",
             f"{dp}/sensor/ConEd_due_date/config",
             f"{dp}/sensor/ConEd_kwh_cost/config",
-            f"{dp}/sensor/ConEd_kwh_used/config",
+            f"{dp}/sensor/ConEd_last_bill_kwh/config",
             f"{dp}/sensor/ConEd_current_meter_usage/config",
             f"{dp}/sensor/ConEd_current_usage_cost/config",
             f"{dp}/sensor/ConEd_billing_start_date/config",
             f"{dp}/sensor/ConEd_billing_end_date/config",
-            f"{dp}/sensor/ConEd_usage_to_date/config",
+            f"{dp}/sensor/ConEd_current_cycle_usage/config",
             f"{dp}/sensor/ConEd_forecasted_usage/config",
+            # Also clean up old sensor names for migration
+            f"{dp}/sensor/ConEd_kwh_used/config",
+            f"{dp}/sensor/ConEd_usage_to_date/config",
         ]
     
     def cleanup_discovery_sync(self):
@@ -660,18 +663,18 @@ class MQTTClient:
         }
         await self.publish("kwh_cost", cost_value, json_payload)
 
-    async def publish_kwh_used(self, kwh_used: Optional[float], timestamp: Optional[str] = None):
-        """Publish kWh used for the billing period"""
+    async def publish_last_bill_kwh(self, kwh_used: Optional[float], timestamp: Optional[str] = None):
+        """Publish kWh used from the most recent bill statement"""
         usage_value = round(kwh_used, 2) if kwh_used else 0
         json_payload = {
-            "event_type": "kwh_used",
+            "event_type": "last_bill_kwh",
             "timestamp": timestamp or utc_now_iso(),
             "data": {
-                "kwh_used": usage_value,
+                "last_bill_kwh": usage_value,
                 "timestamp": timestamp or utc_now_iso()
             }
         }
-        await self.publish("kwh_used", usage_value, json_payload)
+        await self.publish("last_bill_kwh", usage_value, json_payload)
 
     async def publish_current_meter_usage(self, value: float, unit: str = "kWh", timestamp: Optional[str] = None):
         """Publish current meter reading from real-time meter tracking"""
@@ -729,19 +732,19 @@ class MQTTClient:
         }
         await self.publish("billing_end_date", state, json_payload)
 
-    async def publish_usage_to_date(self, usage: Optional[float], timestamp: Optional[str] = None):
-        """Publish kWh usage to date in current billing period"""
+    async def publish_current_cycle_usage(self, usage: Optional[float], timestamp: Optional[str] = None):
+        """Publish kWh usage so far in the current billing cycle (from meter tracking)"""
         usage_value = round(usage, 2) if usage else 0
         json_payload = {
-            "event_type": "usage_to_date",
+            "event_type": "current_cycle_usage",
             "timestamp": timestamp or utc_now_iso(),
             "data": {
-                "usage_to_date": usage_value,
+                "current_cycle_usage": usage_value,
                 "unit": "kWh",
                 "timestamp": timestamp or utc_now_iso()
             }
         }
-        await self.publish("usage_to_date", usage_value, json_payload)
+        await self.publish("current_cycle_usage", usage_value, json_payload)
 
     async def publish_forecasted_usage(self, usage: Optional[float], timestamp: Optional[str] = None):
         """Publish forecasted kWh usage for full billing period"""
@@ -765,9 +768,9 @@ class MQTTClient:
         
         await self.publish_billing_start_date(forecast_data.get("start_date"), ts)
         await self.publish_billing_end_date(forecast_data.get("end_date"), ts)
-        await self.publish_usage_to_date(forecast_data.get("usage_to_date"), ts)
+        await self.publish_current_cycle_usage(forecast_data.get("usage_to_date"), ts)
         await self.publish_forecasted_usage(forecast_data.get("forecasted_usage"), ts)
-        logger.info(f"Published forecast sensors: usage_to_date={forecast_data.get('usage_to_date')}, forecasted={forecast_data.get('forecasted_usage')}")
+        logger.info(f"Published forecast sensors: current_cycle_usage={forecast_data.get('usage_to_date')}, forecasted={forecast_data.get('forecasted_usage')}")
 
     async def publish_bill_details_sensors(self, timestamp: Optional[str] = None):
         """Publish due_date, kwh_cost, kwh_used from latest bill details"""
@@ -778,8 +781,8 @@ class MQTTClient:
                 ts = timestamp or utc_now_iso()
                 await self.publish_due_date(latest.get("due_date"), ts)
                 await self.publish_kwh_cost(latest.get("kwh_cost"), latest.get("kwh_used"), ts)
-                await self.publish_kwh_used(latest.get("kwh_used"), ts)
-                logger.info(f"Published bill details sensors: due={latest.get('due_date')}, kwh_cost={latest.get('kwh_cost')}")
+                await self.publish_last_bill_kwh(latest.get("kwh_used"), ts)
+                logger.info(f"Published bill details sensors: due={latest.get('due_date')}, kwh_cost={latest.get('kwh_cost')}, last_bill_kwh={latest.get('kwh_used')}")
         except Exception as e:
             logger.warning(f"Failed to publish bill details sensors: {e}")
 
