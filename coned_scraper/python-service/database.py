@@ -549,7 +549,6 @@ def get_bill_history_for_graph() -> List[Dict[str, Any]]:
             bd.delivery_charges_json
         FROM bills b
         LEFT JOIN bill_details bd ON b.id = bd.bill_id
-        ORDER BY b.bill_cycle_date ASC
     ''')
     rows = cursor.fetchall()
     conn.close()
@@ -570,9 +569,15 @@ def get_bill_history_for_graph() -> List[Dict[str, Any]]:
             result["delivery_total"] = 0
         
         # Clean up
-        del result["supply_charges_json"]
-        del result["delivery_charges_json"]
+        if "supply_charges_json" in result:
+            del result["supply_charges_json"]
+        if "delivery_charges_json" in result:
+            del result["delivery_charges_json"]
         results.append(result)
+    
+    # Sort using same logic as ledger (handles M/D/YYYY format)
+    # ASC for graphs (oldest first for chronological display)
+    results = sort_bills_by_date(results, desc=False)
     
     return results
 

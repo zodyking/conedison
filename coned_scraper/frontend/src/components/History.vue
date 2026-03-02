@@ -211,11 +211,26 @@ const averageBill = computed(() => {
 
 const sortedHistoryDesc = computed(() => {
   return [...historyData.value].sort((a, b) => {
-    const dateA = a.bill_cycle_date || ''
-    const dateB = b.bill_cycle_date || ''
-    return dateB.localeCompare(dateA)
+    const dateA = parseUSDate(a.bill_cycle_date)
+    const dateB = parseUSDate(b.bill_cycle_date)
+    return dateB - dateA
   })
 })
+
+function parseUSDate(dateStr: string | null): number {
+  if (!dateStr) return 0
+  // Handle M/D/YYYY or MM/DD/YYYY format
+  const parts = dateStr.split('/')
+  if (parts.length === 3) {
+    const month = parseInt(parts[0], 10)
+    const day = parseInt(parts[1], 10)
+    const year = parseInt(parts[2], 10)
+    return new Date(year, month - 1, day).getTime()
+  }
+  // Fallback for ISO format
+  const parsed = Date.parse(dateStr)
+  return isNaN(parsed) ? 0 : parsed
+}
 
 function formatNumber(val: number | null | undefined): string {
   if (val == null) return '—'
@@ -225,8 +240,21 @@ function formatNumber(val: number | null | undefined): string {
 function formatBillCycleDate(dateStr: string | null): string {
   if (!dateStr) return '—'
   try {
+    // Handle M/D/YYYY or MM/DD/YYYY format
+    const parts = dateStr.split('/')
+    if (parts.length === 3) {
+      const month = parseInt(parts[0], 10)
+      const day = parseInt(parts[1], 10)
+      const year = parseInt(parts[2], 10)
+      const date = new Date(year, month - 1, day)
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    }
+    // Fallback for other formats
     const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    if (!isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    }
+    return dateStr
   } catch {
     return dateStr
   }
