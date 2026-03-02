@@ -115,7 +115,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in sortedHistoryDesc" :key="row.bill_id">
+              <tr v-for="row in historyData" :key="row.bill_id">
                 <td>{{ formatBillCycleDate(row.bill_cycle_date) }}</td>
                 <td>{{ formatNumber(row.kwh_used) }}</td>
                 <td>{{ row.kwh_cost ? `$${row.kwh_cost.toFixed(4)}` : '—' }}</td>
@@ -209,28 +209,6 @@ const averageBill = computed(() => {
   return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length).toLocaleString()
 })
 
-const sortedHistoryDesc = computed(() => {
-  return [...historyData.value].sort((a, b) => {
-    const dateA = parseUSDate(a.bill_cycle_date)
-    const dateB = parseUSDate(b.bill_cycle_date)
-    return dateB - dateA
-  })
-})
-
-function parseUSDate(dateStr: string | null): number {
-  if (!dateStr) return 0
-  // Handle M/D/YYYY or MM/DD/YYYY format
-  const parts = dateStr.split('/')
-  if (parts.length === 3) {
-    const month = parseInt(parts[0], 10)
-    const day = parseInt(parts[1], 10)
-    const year = parseInt(parts[2], 10)
-    return new Date(year, month - 1, day).getTime()
-  }
-  // Fallback for ISO format
-  const parsed = Date.parse(dateStr)
-  return isNaN(parsed) ? 0 : parsed
-}
 
 function formatNumber(val: number | null | undefined): string {
   if (val == null) return '—'
@@ -264,10 +242,40 @@ async function fetchHistory() {
   isLoading.value = true
   error.value = null
   try {
-    const res = await fetch(`${getApiBase()}/bill-history`)
+    // Use same endpoint as AccountLedger to ensure consistent data/ordering
+    const res = await fetch(`${getApiBase()}/ledger`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    historyData.value = data.history || []
+    const ledger = await res.json()
+    const bills = ledger.bills || []
+    
+    // Also fetch bill details for the extra parsed data (kwh, supply/delivery)
+    const detailsRes = await fetch(`${getApiBase()}/bill-history`)
+    let detailsMap: Record<number, any> = {}
+    if (detailsRes.ok) {
+      const detailsData = await detailsRes.json()
+      for (const d of (detailsData.history || [])) {
+        detailsMap[d.bill_id] = d
+      }
+    }
+    
+    // Merge ledger bills with details - bills are already in correct order from ledger
+    historyData.value = bills.map((bill: any) => {
+      const details = detailsMap[bill.id] || {}
+      return {
+        bill_id: bill.id,
+        month_range: bill.month_range,
+        bill_cycle_date: bill.bill_cycle_date,
+        bill_total: bill.bill_total,
+        amount_numeric: bill.amount_numeric,
+        kwh_used: details.kwh_used || null,
+        kwh_cost: details.kwh_cost || null,
+        electricity_total: details.electricity_total || null,
+        total_from_billing_period: details.total_from_billing_period || null,
+        billing_days: details.billing_days || null,
+        supply_total: details.supply_total || 0,
+        delivery_total: details.delivery_total || 0,
+      }
+    })
   } catch (e: any) {
     error.value = e.message || 'Failed to load history'
   } finally {
@@ -283,7 +291,9 @@ function destroyCharts() {
 function createCharts() {
   destroyCharts()
   
-  const labels = historyData.value.map(r => r.month_range || `Bill ${r.bill_id}`)
+  // For charts, use chronological order (oldest first) - reverse the DESC order from ledger
+  const chartData = [...historyData.value].reverse()
+  const labels = chartData.map(r => r.month_range || `Bill ${r.bill_id}`)
   
   // kWh Usage Chart
   if (kwhChart.value) {
@@ -295,7 +305,7 @@ function createCharts() {
           labels,
           datasets: [{
             label: 'kWh Used',
-            data: historyData.value.map(r => r.kwh_used || 0),
+            data: chartData.map(r => r.kwh_used || 0),
             backgroundColor: 'rgba(0, 136, 204, 0.7)',
             borderColor: 'rgba(0, 136, 204, 1)',
             borderWidth: 1,
@@ -334,7 +344,7 @@ function createCharts() {
           labels,
           datasets: [{
             label: 'Bill Total',
-            data: historyData.value.map(r => r.electricity_total || r.amount_numeric || 0),
+            data: chartData.map(r => r.electricity_total || r.amount_numeric || 0),
             borderColor: 'rgba(34, 139, 34, 1)',
             backgroundColor: 'rgba(34, 139, 34, 0.1)',
             fill: true,
@@ -375,7 +385,7 @@ function createCharts() {
           labels,
           datasets: [{
             label: '$/kWh',
-            data: historyData.value.map(r => r.kwh_cost || 0),
+            data: chartData.map(r => r.kwh_cost || 0),
             borderColor: 'rgba(220, 20, 60, 1)',
             backgroundColor: 'rgba(220, 20, 60, 0.1)',
             fill: true,
@@ -417,7 +427,7 @@ function createCharts() {
           datasets: [
             {
               label: 'Supply',
-              data: historyData.value.map(r => r.supply_total || 0),
+              data: chartData.map(r => r.supply_total || 0),
               backgroundColor: 'rgba(255, 159, 64, 0.7)',
               borderColor: 'rgba(255, 159, 64, 1)',
               borderWidth: 1,
@@ -425,7 +435,7 @@ function createCharts() {
             },
             {
               label: 'Delivery',
-              data: historyData.value.map(r => r.delivery_total || 0),
+              data: chartData.map(r => r.delivery_total || 0),
               backgroundColor: 'rgba(75, 192, 192, 0.7)',
               borderColor: 'rgba(75, 192, 192, 1)',
               borderWidth: 1,
