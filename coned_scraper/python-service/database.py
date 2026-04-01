@@ -276,6 +276,28 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payments_bill_id ON payments(bill_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payments_first_scraped ON payments(first_scraped_at)')
     
+    try:
+        cursor.execute('ALTER TABLE payee_users ADD COLUMN ha_notify_entity TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payment_petitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_id INTEGER NOT NULL,
+            requester_user_id INTEGER NOT NULL,
+            respondent_user_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            responded_at TEXT,
+            FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+            FOREIGN KEY (requester_user_id) REFERENCES payee_users(id),
+            FOREIGN KEY (respondent_user_id) REFERENCES payee_users(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_petitions_payment ON payment_petitions(payment_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_petitions_status ON payment_petitions(status)')
+    
     conn.commit()
     conn.close()
 
@@ -1263,8 +1285,14 @@ def delete_payee_user(user_id: int) -> bool:
     conn.close()
     return deleted
 
-def update_payee_user(user_id: int, name: Optional[str] = None, is_default: Optional[bool] = None, is_admin: Optional[bool] = None) -> bool:
-    """Update a payee user"""
+def update_payee_user(
+    user_id: int,
+    name: Optional[str] = None,
+    is_default: Optional[bool] = None,
+    is_admin: Optional[bool] = None,
+    ha_notify_entity: Optional[str] = None,
+) -> bool:
+    """Update a payee user. Pass ha_notify_entity as \"\" to clear."""
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -1283,6 +1311,9 @@ def update_payee_user(user_id: int, name: Optional[str] = None, is_default: Opti
     if is_admin is not None:
         updates.append('is_admin = ?')
         params.append(1 if is_admin else 0)
+    if ha_notify_entity is not None:
+        updates.append('ha_notify_entity = ?')
+        params.append(ha_notify_entity.strip() if ha_notify_entity else None)
     
     if updates:
         params.append(user_id)
@@ -1573,6 +1604,135 @@ def clear_payment_attribution(payment_id: int) -> bool:
     conn.commit()
     conn.close()
     return updated
+
+def get_payee_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    """Single payee row by id."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM payee_users WHERE id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def create_payment_petition(payment_id: int, requester_user_id: int) -> Dict[str, Any]:
+    """
+    Start a payment petition. Returns {'success': True, 'petition_id': int} or
+    {'success': False, 'error': str}.
+    """
+    payment = get_payment_by_id(payment_id)
+    if not payment:
+        return {'success': False, 'error': 'Payment not found'}
+    respondent_id = payment.get('payee_user_id')
+    if not respondent_id:
+        return {'success': False, 'error': 'Payment has no assigned payee to petition'}
+    if respondent_id == requester_user_id:
+        return {'success': False, 'error': 'Cannot petition your own payment claim'}
+    requester = get_payee_user_by_id(requester_user_id)
+    if not requester:
+        return {'success': False, 'error': 'Requester not found'}
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT id FROM payment_petitions
+        WHERE payment_id = ? AND status = 'pending'
+        ''',
+        (payment_id,),
+    )
+    if cursor.fetchone():
+        conn.close()
+        return {'success': False, 'error': 'A pending petition already exists for this payment'}
+    now = utc_now_iso()
+    cursor.execute(
+        '''
+        INSERT INTO payment_petitions (
+            payment_id, requester_user_id, respondent_user_id, status, created_at
+        ) VALUES (?, ?, ?, 'pending', ?)
+        ''',
+        (payment_id, requester_user_id, respondent_id, now),
+    )
+    petition_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'petition_id': petition_id}
+
+def get_payment_petition_by_id(petition_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM payment_petitions WHERE id = ?', (petition_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def list_pending_petitions_for_respondent(respondent_user_id: int) -> List[Dict[str, Any]]:
+    """Pending petitions where this user must respond (was the claimed payee at filing)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT pp.*, p.amount, p.payment_date, p.description,
+               rq.name AS requester_name, rs.name AS respondent_name
+        FROM payment_petitions pp
+        JOIN payments p ON p.id = pp.payment_id
+        JOIN payee_users rq ON rq.id = pp.requester_user_id
+        JOIN payee_users rs ON rs.id = pp.respondent_user_id
+        WHERE pp.status = 'pending' AND pp.respondent_user_id = ?
+        ORDER BY pp.created_at DESC
+        ''',
+        (respondent_user_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def respond_payment_petition(petition_id: int, confirm_original: bool) -> Dict[str, Any]:
+    """
+    Respondent answers Yes (keep claim) or No (reassign to requester).
+    Returns {'success': True, ...} or {'success': False, 'error': str}.
+    """
+    petition = get_payment_petition_by_id(petition_id)
+    if not petition:
+        return {'success': False, 'error': 'Petition not found'}
+    if petition['status'] != 'pending':
+        return {'success': False, 'error': 'Petition is not pending'}
+    payment_id = petition['payment_id']
+    requester_id = petition['requester_user_id']
+    respondent_id = petition['respondent_user_id']
+    payment = get_payment_by_id(payment_id)
+    if not payment:
+        return {'success': False, 'error': 'Payment not found'}
+    now = utc_now_iso()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if confirm_original:
+        cursor.execute(
+            '''
+            UPDATE payment_petitions SET status = 'affirmed', responded_at = ?
+            WHERE id = ?
+            ''',
+            (now, petition_id),
+        )
+    else:
+        ok = attribute_payment(payment_id, requester_id, method='petition')
+        if not ok:
+            conn.close()
+            return {'success': False, 'error': 'Failed to reassign payment'}
+        cursor.execute(
+            '''
+            UPDATE payment_petitions SET status = 'transferred', responded_at = ?
+            WHERE id = ?
+            ''',
+            (now, petition_id),
+        )
+    conn.commit()
+    conn.close()
+    return {
+        'success': True,
+        'confirm_original': confirm_original,
+        'payment_id': payment_id,
+        'requester_user_id': requester_id,
+        'respondent_user_id': respondent_id,
+    }
 
 def get_unverified_payments(limit: int = 50) -> List[Dict[str, Any]]:
     """Get payments that need verification"""

@@ -22,6 +22,64 @@
       @close="showPdfModal = false; viewingBillId = null"
     />
 
+    <!-- Payment actions (Unclaim / Petition) -->
+    <div
+      v-if="paymentActionPayment"
+      class="ha-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="payment-actions-title"
+      @click.self="paymentActionPayment = null"
+    >
+      <div class="ha-modal ha-payment-actions-modal">
+        <div class="ha-modal-header">
+          <span id="payment-actions-title">Payment</span>
+          <button type="button" class="ha-modal-close" @click="paymentActionPayment = null">×</button>
+        </div>
+        <div class="ha-modal-body">
+          <p class="ha-modal-desc">
+            {{ paymentActionPayment.amount }} · {{ paymentActionPayment.payment_date }}
+            <span v-if="paymentActionPayment.payee_name"> · {{ paymentActionPayment.payee_name }}</span>
+          </p>
+          <div v-if="actionMessage" :class="['ha-message', actionMessage.type]">{{ actionMessage.text }}</div>
+          <div class="ha-payment-actions-btns">
+            <button
+              v-if="canUnclaim(paymentActionPayment)"
+              type="button"
+              class="ha-btn ha-btn-gray"
+              :disabled="paymentActionLoading"
+              @click="handleUnclaimPayment"
+            >
+              Unclaim
+            </button>
+            <template v-if="canPetition(paymentActionPayment)">
+              <label class="ha-form-label">Petition as</label>
+              <select v-model.number="petitionRequesterId" class="ha-form-input">
+                <option v-for="u in petitionRequesterOptions(paymentActionPayment)" :key="u.id" :value="u.id">
+                  {{ u.name }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="ha-btn ha-btn-primary"
+                :disabled="paymentActionLoading || petitionRequesterId == null"
+                @click="handlePetitionPayment"
+              >
+                Petition
+              </button>
+            </template>
+            <p v-else-if="paymentActionPayment.payee_user_id" class="ha-hint">
+              Add another payee in Settings to start a petition.
+            </p>
+            <p v-else class="ha-hint">Assign a payee before unclaim/petition.</p>
+          </div>
+        </div>
+        <div class="ha-modal-footer">
+          <button type="button" class="ha-btn ha-btn-gray" @click="paymentActionPayment = null">Close</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Loading -->
     <div v-if="isLoading" class="ha-loading-state">
       <img :src="ajaxLoader" alt="Loading" class="ha-loading-img" />
@@ -46,6 +104,28 @@
 
     <!-- Ledger Content -->
     <div v-else class="ha-ledger">
+      <div v-if="payeeUsers.length" class="ha-ledger-petition-bar">
+        <label class="ha-petition-bar-label">Respond to petitions as</label>
+        <select v-model.number="respondentUserId" class="ha-petition-bar-select" @change="onRespondentChange()">
+          <option v-for="u in payeeUsers" :key="u.id" :value="u.id">{{ u.name }}</option>
+        </select>
+      </div>
+      <div v-if="pendingPetitions.length" class="ha-petition-pending-banner">
+        <div class="ha-petition-pending-title">Pending payment petitions</div>
+        <div
+          v-for="p in pendingPetitions"
+          :key="p.id"
+          class="ha-petition-pending-row"
+        >
+          <span class="ha-petition-pending-text">
+            {{ p.requester_name }} — {{ p.amount }} on {{ p.payment_date }}
+          </span>
+          <div class="ha-petition-pending-actions">
+            <button type="button" class="ha-btn-sm ha-btn-green" @click="respondPetition(p.id, true)">Yes</button>
+            <button type="button" class="ha-btn-sm ha-btn-red" @click="respondPetition(p.id, false)">No</button>
+          </div>
+        </div>
+      </div>
       <!-- Account Summary (top of content, scrolls with page) -->
       <div class="ha-ledger-summary">
       <div class="ha-card ha-card-summary">
@@ -191,7 +271,13 @@
                       :key="payment.id"
                       class="ha-payment-entry"
                     >
-                      <div class="ha-payment-row">
+                      <div
+                        class="ha-payment-row ha-payment-row-interactive"
+                        role="button"
+                        tabindex="0"
+                        @click.stop="openPaymentActions(payment)"
+                        @keydown.enter.prevent.stop="openPaymentActions(payment)"
+                      >
                         <div class="ha-payment-meta">
                           <span class="ha-payment-badge">Payment</span>
                           <div>
@@ -245,7 +331,13 @@
                 :key="payment.id"
                 class="ha-payment-entry"
               >
-                <div class="ha-payment-row">
+                <div
+                  class="ha-payment-row ha-payment-row-interactive"
+                  role="button"
+                  tabindex="0"
+                  @click.stop="openPaymentActions(payment)"
+                  @keydown.enter.prevent.stop="openPaymentActions(payment)"
+                >
                   <div class="ha-payment-meta">
                     <span class="ha-payment-badge">Payment</span>
                     <div>
@@ -312,6 +404,11 @@ interface Payment {
   verification_method: string | null
 }
 
+interface PayeeOption {
+  id: number
+  name: string
+}
+
 interface Bill {
   id: number
   bill_cycle_date: string
@@ -335,6 +432,8 @@ interface LedgerData {
   orphan_payments: Payment[]
 }
 
+const LEDGER_RESPONDENT_KEY = 'coned_ledger_respondent_id'
+
 const ledgerData = ref<LedgerData | null>(null)
 const screenshotPath = ref<string | null>(null)
 const isLoading = ref(true)
@@ -346,6 +445,21 @@ const pdfExists = ref(false)
 const billSummaries = ref<Record<number, any>>({})
 const expandedBills = ref<Set<number>>(new Set())
 const expandedPayments = ref<Set<number>>(new Set())
+
+const paymentActionPayment = ref<Payment | null>(null)
+const petitionRequesterId = ref<number | null>(null)
+const paymentActionLoading = ref(false)
+const actionMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const payeeUsers = ref<PayeeOption[]>([])
+const respondentUserId = ref<number | null>(null)
+const pendingPetitions = ref<
+  Array<{
+    id: number
+    amount: string
+    payment_date: string
+    requester_name: string
+  }>
+>([])
 
 // Meter tracking state
 interface MeterReadingData {
@@ -525,6 +639,145 @@ function navigateToSettings() {
   emit('navigate', 'settings')
 }
 
+function petitionRequesterOptions(payment: Payment): PayeeOption[] {
+  const pid = payment.payee_user_id
+  return payeeUsers.value.filter((u) => u.id !== pid)
+}
+
+function canPetition(payment: Payment) {
+  if (payment.payee_user_id == null) return false
+  return petitionRequesterOptions(payment).length > 0
+}
+
+function canUnclaim(payment: Payment) {
+  return payment.payee_user_id != null
+}
+
+function openPaymentActions(payment: Payment) {
+  paymentActionPayment.value = payment
+  actionMessage.value = null
+  const opts = petitionRequesterOptions(payment)
+  petitionRequesterId.value = opts.length ? opts[0].id : null
+}
+
+async function loadPayeeUsersList() {
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users`)
+    if (!res.ok) return
+    const d = await res.json()
+    payeeUsers.value = (d.users || []).map((u: { id: number; name: string }) => ({
+      id: u.id,
+      name: u.name,
+    }))
+    const stored = localStorage.getItem(LEDGER_RESPONDENT_KEY)
+    const sid = stored ? parseInt(stored, 10) : NaN
+    if (payeeUsers.value.some((u) => u.id === sid)) {
+      respondentUserId.value = sid
+    } else if (payeeUsers.value.length) {
+      respondentUserId.value = payeeUsers.value[0].id
+    }
+    await loadPendingPetitions()
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadPendingPetitions() {
+  if (respondentUserId.value == null) {
+    pendingPetitions.value = []
+    return
+  }
+  try {
+    const res = await fetch(
+      `${getApiBase()}/payment-petitions/pending?respondent_user_id=${respondentUserId.value}`
+    )
+    if (res.ok) {
+      const d = await res.json()
+      pendingPetitions.value = d.petitions || []
+    }
+  } catch {
+    pendingPetitions.value = []
+  }
+}
+
+function onRespondentChange() {
+  if (respondentUserId.value != null) {
+    localStorage.setItem(LEDGER_RESPONDENT_KEY, String(respondentUserId.value))
+  }
+  loadPendingPetitions()
+}
+
+async function handleUnclaimPayment() {
+  const p = paymentActionPayment.value
+  if (!p || !canUnclaim(p)) return
+  if (!confirm('Remove payee assignment for this payment?')) return
+  paymentActionLoading.value = true
+  actionMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/payments/${p.id}/attribution`, { method: 'DELETE' })
+    if (res.ok) {
+      actionMessage.value = { type: 'success', text: 'Payee cleared.' }
+      await loadLedgerData()
+      await loadAllBillSummaries()
+      paymentActionPayment.value = null
+    } else {
+      const e = await res.json().catch(() => ({}))
+      actionMessage.value = { type: 'error', text: (e as { detail?: string }).detail || 'Failed' }
+    }
+  } catch {
+    actionMessage.value = { type: 'error', text: 'Network error' }
+  } finally {
+    paymentActionLoading.value = false
+  }
+}
+
+async function handlePetitionPayment() {
+  const p = paymentActionPayment.value
+  if (!p || petitionRequesterId.value == null) return
+  paymentActionLoading.value = true
+  actionMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/payments/${p.id}/petition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requester_user_id: petitionRequesterId.value }),
+    })
+    if (res.ok) {
+      actionMessage.value = { type: 'success', text: 'Petition filed. Notifications sent if configured.' }
+      await loadLedgerData()
+      await loadPendingPetitions()
+      paymentActionPayment.value = null
+    } else {
+      const e = await res.json().catch(() => ({}))
+      actionMessage.value = { type: 'error', text: (e as { detail?: string }).detail || 'Failed' }
+    }
+  } catch {
+    actionMessage.value = { type: 'error', text: 'Network error' }
+  } finally {
+    paymentActionLoading.value = false
+  }
+}
+
+async function respondPetition(petitionId: number, confirmOriginal: boolean) {
+  try {
+    const res = await fetch(`${getApiBase()}/payment-petitions/${petitionId}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm_original: confirmOriginal }),
+    })
+    if (res.ok) {
+      await loadLedgerData()
+      await loadAllBillSummaries()
+      await loadPendingPetitions()
+    } else {
+      const e = await res.json().catch(() => ({}))
+      alert((e as { detail?: string }).detail || 'Failed to respond')
+    }
+  } catch {
+    alert('Network error')
+  }
+}
+
 async function loadAllBillSummaries() {
   try {
     const res = await fetch(`${getApiBase()}/bills/all-summaries`)
@@ -547,9 +800,11 @@ onMounted(() => {
   loadMeterData()
   checkPdfExists()
   loadAllBillSummaries()
+  loadPayeeUsersList()
   interval = setInterval(() => {
     loadLedgerData()
     loadAllBillSummaries()
+    loadPendingPetitions()
   }, 30000)
 })
 onUnmounted(() => clearInterval(interval))
@@ -985,5 +1240,119 @@ onUnmounted(() => clearInterval(interval))
 }
 .ha-btn-pdf:hover {
   background: #0288d1;
+}
+
+.ha-payment-row-interactive {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+}
+.ha-payment-row-interactive:hover {
+  background: rgba(0, 136, 204, 0.06);
+}
+.ha-payment-row-interactive:focus {
+  outline: 2px solid #0088cc;
+  outline-offset: 2px;
+}
+
+.ha-ledger-petition-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #f5f5f5;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+.ha-petition-bar-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #555;
+}
+.ha-petition-bar-select {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  min-width: 140px;
+}
+
+.ha-petition-pending-banner {
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  background: #fff8e1;
+  border: 1px solid #ffcc80;
+  border-radius: 8px;
+}
+.ha-petition-pending-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #e65100;
+  margin-bottom: 0.5rem;
+}
+.ha-petition-pending-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid #ffe0b2;
+  font-size: 0.8rem;
+}
+.ha-petition-pending-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.ha-petition-pending-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+.ha-btn-sm {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.7rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ha-btn-sm.ha-btn-green {
+  background: #4caf50;
+  color: white;
+}
+.ha-btn-sm.ha-btn-red {
+  background: #f44336;
+  color: white;
+}
+
+.ha-payment-actions-modal.ha-modal {
+  background: white;
+  border-radius: 12px;
+  max-width: 420px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+.ha-payment-actions-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.ha-payment-actions-btns .ha-form-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin: 0;
+}
+.ha-hint {
+  font-size: 0.75rem;
+  color: #666;
+  margin: 0;
 }
 </style>

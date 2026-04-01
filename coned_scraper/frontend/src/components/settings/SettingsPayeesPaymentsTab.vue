@@ -31,6 +31,27 @@
                 <span>%</span>
               </div>
               <div class="ha-cards">Cards: {{ user.cards?.length ? user.cards.map((c: string) => '*' + c).join(', ') : 'None' }} — click to manage</div>
+              <div class="ha-notify-row" @click.stop>
+                <label class="ha-notify-label">HA mobile notify entity</label>
+                <div class="ha-notify-input-row">
+                  <input
+                    v-model="notifyEntityDraft[user.id]"
+                    type="text"
+                    class="ha-form-input ha-notify-input"
+                    placeholder="e.g. mobile_app_pixel"
+                    @focus="initNotifyDraft(user)"
+                  />
+                  <button
+                    type="button"
+                    class="ha-btn-sm"
+                    :disabled="notifySaving[user.id]"
+                    @click="saveNotifyEntity(user)"
+                  >
+                    {{ notifySaving[user.id] ? '…' : 'Save' }}
+                  </button>
+                </div>
+                <p class="ha-notify-hint">Home Assistant <code>notify.___</code> service name (addon only). Used for payment petitions.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -171,7 +192,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { getApiBase } from '../../lib/api-base'
 
-interface User { id: number; name: string; is_default: boolean; cards: string[]; responsibility_percent?: number }
+interface User {
+  id: number
+  name: string
+  is_default: boolean
+  cards: string[]
+  responsibility_percent?: number
+  ha_notify_entity?: string | null
+}
 interface CardItem { id: number; user_id: number; card_last_four: string; card_label: string | null }
 interface Payment { id: number; payment_date: string; amount: string; description: string; bill_id: number | null; bill_month: string | null; bill_cycle: string | null; payee_name: string | null; payee_user_id: number | null; payee_status: string }
 interface Bill { id: number; bill_cycle_date: string; month_range: string; bill_total: string; payments: Payment[] }
@@ -199,6 +227,9 @@ const cardLoading = ref(false)
 const editingCardId = ref<number | null>(null)
 const editingLabel = ref('')
 
+const notifyEntityDraft = ref<Record<number, string>>({})
+const notifySaving = ref<Record<number, boolean>>({})
+
 const totalResponsibility = computed(() => Object.values(responsibilities.value).reduce((a, b) => a + (b || 0), 0))
 const isValidCardDigits = computed(() => /^\d{4}$/.test(newCardDigits.value))
 const totalPayments = computed(() => {
@@ -207,6 +238,12 @@ const totalPayments = computed(() => {
   return n
 })
 
+function initNotifyDraft(user: User) {
+  if (notifyEntityDraft.value[user.id] === undefined) {
+    notifyEntityDraft.value[user.id] = user.ha_notify_entity || ''
+  }
+}
+
 async function loadUsers() {
   try {
     const res = await fetch(`${getApiBase()}/payee-users`)
@@ -214,10 +251,37 @@ async function loadUsers() {
       const d = await res.json()
       users.value = d.users || []
       const next: Record<number, number> = {}
-      users.value.forEach((u) => { next[u.id] = u.responsibility_percent ?? 0 })
+      users.value.forEach((u) => {
+        next[u.id] = u.responsibility_percent ?? 0
+        notifyEntityDraft.value[u.id] = u.ha_notify_entity || ''
+      })
       responsibilities.value = next
     }
   } catch (e) { console.error(e) }
+}
+
+async function saveNotifyEntity(user: User) {
+  const val = (notifyEntityDraft.value[user.id] ?? '').trim()
+  notifySaving.value[user.id] = true
+  message.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users/${user.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ha_notify_entity: val || null }),
+    })
+    if (res.ok) {
+      message.value = { type: 'success', text: 'Notify entity saved' }
+      await loadUsers()
+    } else {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: (e as { detail?: string }).detail || 'Failed' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    notifySaving.value[user.id] = false
+  }
 }
 
 async function loadUnverified() {
@@ -432,6 +496,12 @@ onMounted(() => {
 .ha-users-list { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
 .ha-user-card { padding: 0.75rem; border-radius: 8px; border: 1px solid #e0e0e0; cursor: pointer; }
 .ha-user-card.default { border-color: #03a9f4; background: #e3f2fd; }
+.ha-notify-row { margin-top: 0.65rem; padding-top: 0.65rem; border-top: 1px solid #eee; }
+.ha-notify-label { display: block; font-size: 0.75rem; font-weight: 600; color: #555; margin-bottom: 0.35rem; }
+.ha-notify-input-row { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.ha-notify-input { flex: 1; min-width: 140px; font-size: 0.85rem; }
+.ha-notify-hint { font-size: 0.65rem; color: #888; margin: 0.35rem 0 0 0; line-height: 1.35; }
+.ha-notify-hint code { font-size: 0.65rem; background: #f5f5f5; padding: 0.05rem 0.2rem; border-radius: 3px; }
 .ha-user-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
 .ha-user-name { font-weight: 600; }
 .ha-badge { font-size: 0.65rem; background: #03a9f4; color: white; padding: 0.15rem 0.4rem; border-radius: 3px; }

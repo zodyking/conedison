@@ -36,12 +36,17 @@ from database import (
     update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances,
     upsert_bill_document, get_bill_document, get_all_bill_documents_with_periods,
     get_latest_bill_id_with_document, delete_bill_document, migrate_legacy_pdf,
+    get_payee_user_by_id,
+    create_payment_petition,
+    get_payment_petition_by_id,
+    list_pending_petitions_for_respondent,
+    respond_payment_petition,
 )
 
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-30-v3"
+CODE_VERSION = "1.3.65"
 
 @app.get("/api/version")
 async def get_version():
@@ -1923,6 +1928,7 @@ class PayeeUserUpdateModel(BaseModel):
     name: Optional[str] = None
     is_default: Optional[bool] = None
     is_admin: Optional[bool] = None
+    ha_notify_entity: Optional[str] = None
 
 class UserCardModel(BaseModel):
     user_id: int
@@ -1990,7 +1996,17 @@ async def update_responsibilities(request: Request):
 async def update_user(user_id: int, user: PayeeUserUpdateModel):
     """Update a payee user"""
     try:
-        update_payee_user(user_id, user.name, user.is_default, user.is_admin)
+        ha_kw: Dict[str, Any] = {}
+        if "ha_notify_entity" in user.model_fields_set:
+            raw = user.ha_notify_entity
+            ha_kw["ha_notify_entity"] = raw.strip() if isinstance(raw, str) else ""
+        update_payee_user(
+            user_id,
+            user.name,
+            user.is_default,
+            user.is_admin,
+            **ha_kw,
+        )
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2107,6 +2123,149 @@ async def clear_payment_attribution_endpoint(payment_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class PaymentPetitionCreateModel(BaseModel):
+    requester_user_id: int
+
+
+class PaymentPetitionRespondModel(BaseModel):
+    confirm_original: bool
+
+
+async def _notify_petition_filed(petition_id: int) -> None:
+    from ha_notify import notify_mobile
+
+    petition = get_payment_petition_by_id(petition_id)
+    if not petition:
+        return
+    payment = get_payment_by_id(petition["payment_id"])
+    if not payment:
+        return
+    requester = get_payee_user_by_id(petition["requester_user_id"])
+    respondent = get_payee_user_by_id(petition["respondent_user_id"])
+    if not requester or not respondent:
+        return
+    amt = payment.get("amount") or ""
+    pdate = payment.get("payment_date") or ""
+    req_name = requester["name"]
+    res_name = respondent["name"]
+    msg_respondent = (
+        f"{req_name} has requested a payment petition because you may have mistakenly claimed "
+        f"a payment made on {pdate} of {amt}. (Tap & hold to respond)"
+    )
+    actions = [
+        {"action": f"CONED_PETITION_YES_{petition_id}", "title": "Yes"},
+        {"action": f"CONED_PETITION_NO_{petition_id}", "title": "No"},
+    ]
+    ent_r = respondent.get("ha_notify_entity")
+    if ent_r:
+        ok, err = await notify_mobile(
+            ent_r, msg_respondent, title="Payment petition", actions=actions
+        )
+        if not ok:
+            add_log("warning", f"Petition notify respondent: {err}")
+    ent_q = requester.get("ha_notify_entity")
+    msg_req = (
+        f"A payment petition has been made for payment made on {pdate} in the amount of {amt}, "
+        f"waiting for {res_name} to respond."
+    )
+    if ent_q:
+        ok, err = await notify_mobile(ent_q, msg_req, title="Payment petition")
+        if not ok:
+            add_log("warning", f"Petition notify requester: {err}")
+
+
+async def _notify_petition_resolved(petition_id: int, confirm_original: bool) -> None:
+    from ha_notify import notify_mobile
+
+    petition = get_payment_petition_by_id(petition_id)
+    if not petition:
+        return
+    payment = get_payment_by_id(petition["payment_id"])
+    if not payment:
+        return
+    requester = get_payee_user_by_id(petition["requester_user_id"])
+    respondent = get_payee_user_by_id(petition["respondent_user_id"])
+    if not requester or not respondent:
+        return
+    amt = payment.get("amount") or ""
+    pdate = payment.get("payment_date") or ""
+    req_name = requester["name"]
+    res_name = respondent["name"]
+    if confirm_original:
+        msg_req = (
+            f"Petition resolved: {res_name} confirmed they claimed the payment on {pdate} ({amt})."
+        )
+        msg_res = f"You confirmed your claim for the payment on {pdate} ({amt})."
+    else:
+        msg_req = (
+            f"The payment of {amt} on {pdate} has been reassigned to you following the petition."
+        )
+        msg_res = f"The payment of {amt} on {pdate} has been reassigned to {req_name}."
+    ent_q = requester.get("ha_notify_entity")
+    if ent_q:
+        ok, err = await notify_mobile(ent_q, msg_req, title="Petition result")
+        if not ok:
+            add_log("warning", f"Petition result notify requester: {err}")
+    ent_r = respondent.get("ha_notify_entity")
+    if ent_r:
+        ok, err = await notify_mobile(ent_r, msg_res, title="Petition result")
+        if not ok:
+            add_log("warning", f"Petition result notify respondent: {err}")
+
+
+@app.post("/api/payments/{payment_id}/petition")
+async def create_payment_petition_endpoint(
+    payment_id: int, body: PaymentPetitionCreateModel
+):
+    """Start a payment petition (requester disputes current payee claim)."""
+    try:
+        result = create_payment_petition(payment_id, body.requester_user_id)
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=400, detail=result.get("error", "Failed")
+            )
+        pid = result["petition_id"]
+        add_log("info", f"Created payment petition {pid} for payment {payment_id}")
+        await _notify_petition_filed(pid)
+        return {"success": True, "petition_id": pid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/payment-petitions/pending")
+async def list_pending_petitions(respondent_user_id: int):
+    """Pending petitions the given payee must respond to."""
+    try:
+        rows = list_pending_petitions_for_respondent(respondent_user_id)
+        return {"petitions": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/payment-petitions/{petition_id}/respond")
+async def respond_payment_petition_endpoint(
+    petition_id: int, body: PaymentPetitionRespondModel
+):
+    """Respond Yes (keep claim) or No (reassign to requester)."""
+    try:
+        r = respond_payment_petition(petition_id, body.confirm_original)
+        if not r.get("success"):
+            raise HTTPException(status_code=400, detail=r.get("error", "Failed"))
+        add_log(
+            "info",
+            f"Petition {petition_id} resolved confirm_original={body.confirm_original}",
+        )
+        await _notify_petition_resolved(petition_id, body.confirm_original)
+        return {"success": True, **r}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/payments/{payment_id}")
 async def get_payment_endpoint(payment_id: int):

@@ -411,9 +411,6 @@ class MeterService:
             if value is None:
                 return
             
-            # Publish current meter usage
-            await mqtt_client.publish_current_meter_usage(value, unit, timestamp)
-            
             # Calculate and publish cost
             latest_bill = get_latest_bill_with_details()
             if latest_bill and latest_bill.get('kwh_cost'):

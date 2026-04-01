@@ -19,6 +19,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# MQTT state text for bill PDF sensor (URLs live in json attributes)
+BILL_PDF_MQTT_STATE = "check attributes"
+
+
 class MQTTClient:
     """MQTT client for publishing sensor data to Home Assistant"""
     
@@ -242,6 +246,7 @@ class MQTTClient:
                     "unique_id": "ConEd_bill_pdf_url",
                     "state_topic": f"{bt}/bill_pdf_url",
                     "value_template": "{{ value }}",
+                    "icon": "mdi:file-pdf-box",
                     "json_attributes_topic": f"{bt}/bill_pdf_url_json",
                     "json_attributes_template": "{{ value_json.data | tojson }}",
                     "device": device,
@@ -297,21 +302,6 @@ class MQTTClient:
                     "device_class": "energy",
                     "icon": "mdi:flash",
                     "json_attributes_topic": f"{bt}/last_bill_kwh_json",
-                    "json_attributes_template": json_attrs,
-                    "device": device,
-                },
-            },
-            {
-                "topic": f"{dp}/sensor/ConEd_current_meter_usage/config",
-                "payload": {
-                    "name": "ConEd Current Meter Usage",
-                    "unique_id": "ConEd_current_meter_usage",
-                    "state_topic": f"{bt}/current_meter_usage",
-                    "unit_of_measurement": "kWh",
-                    "device_class": "energy",
-                    "state_class": "total_increasing",
-                    "icon": "mdi:gauge",
-                    "json_attributes_topic": f"{bt}/current_meter_usage_json",
                     "json_attributes_template": json_attrs,
                     "device": device,
                 },
@@ -431,7 +421,6 @@ class MQTTClient:
             "ConEd_due_date",
             "ConEd_kwh_cost",
             "ConEd_last_bill_kwh",
-            "ConEd_current_meter_usage",
             "ConEd_current_usage_cost",
             "ConEd_billing_start_date",
             "ConEd_billing_end_date",
@@ -443,6 +432,7 @@ class MQTTClient:
         old_sensors = [
             "ConEd_kwh_used",
             "ConEd_usage_to_date",
+            "ConEd_current_meter_usage",
         ]
         
         # Legacy names without ConEd prefix
@@ -693,7 +683,7 @@ class MQTTClient:
             "timestamp": timestamp or utc_now_iso(),
             "data": {"pdf_url": pdf_url, "all_bills": {}, "timestamp": timestamp or utc_now_iso()}
         }
-        await self.publish("bill_pdf_url", pdf_url, json_payload)
+        await self.publish("bill_pdf_url", BILL_PDF_MQTT_STATE, json_payload)
 
     async def publish_due_date(self, due_date: Optional[str], timestamp: Optional[str] = None):
         """Publish bill due date"""
@@ -734,21 +724,6 @@ class MQTTClient:
             }
         }
         await self.publish("last_bill_kwh", usage_value, json_payload)
-
-    async def publish_current_meter_usage(self, value: float, unit: str = "kWh", timestamp: Optional[str] = None):
-        """Publish current meter reading from real-time meter tracking"""
-        usage_value = round(value, 2) if value else 0
-        json_payload = {
-            "event_type": "current_meter_usage",
-            "timestamp": timestamp or utc_now_iso(),
-            "data": {
-                "value": usage_value,
-                "unit": unit,
-                "timestamp": timestamp or utc_now_iso()
-            }
-        }
-        await self.publish("current_meter_usage", usage_value, json_payload)
-        logger.info(f"Published current meter usage: {usage_value} {unit}")
 
     async def publish_current_usage_cost(self, cost: float, timestamp: Optional[str] = None):
         """Publish calculated cost for current meter usage"""
@@ -866,7 +841,7 @@ class MQTTClient:
                 "timestamp": timestamp or utc_now_iso()
             }
         }
-        await self.publish("bill_pdf_url", latest_url or "unknown", json_payload)
+        await self.publish("bill_pdf_url", BILL_PDF_MQTT_STATE, json_payload)
 
     async def publish_payee_summary(self, payee_data: list, bill_info: Dict[str, Any], timestamp: Optional[str] = None):
         """
